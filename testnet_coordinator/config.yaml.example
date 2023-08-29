@@ -1,0 +1,12 @@
+
+
+# start: 0 #batch start from
+# end: 0 #batch end at
+# sampling: 0.0 #sampling index at <sampling>%
+# proxy_only: true #only proxy node message
+# group_id: 0 #would be send in channel notification
+chunkURL: http://<server host>/api/chunks?batch_index=%d
+# notifierURL: <notifier, full POST url>
+server:
+    #host: 0.0.0.0:8560
+    #url: #the base url server used for

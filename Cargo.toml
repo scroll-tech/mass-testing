@@ -1,0 +1,38 @@
+[package]
+name = "testnet-runner"
+version = "0.6.4"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+anyhow = "1.0"
+dotenv = "0.15.0"
+ethers-providers = "1.0"
+itertools = "0.10.5"
+log = "0.4"
+log4rs = { version = "1.2.0", default_features = false, features = ["console_appender", "file_appender"] }
+reqwest = { version = "0.11", default-features = false, features = [ "json", "rustls-tls" ] }
+serde = "1.0"
+serde_derive = "1.0"
+serde_json = "1.0.66"
+tar = "0.4"
+flate2 = "1"
+tokio = { version = "1", features = ["full"] }
+prover = { git = "https://github.com/scroll-tech/scroll-prover", branch = "develop_1" }
+types = { git = "https://github.com/scroll-tech/scroll-prover", branch = "develop_1" }
+
+
+[patch.crates-io]
+ethers-core = { git = "https://github.com/scroll-tech/ethers-rs.git", branch = "v0.17.0" }
+[patch."https://github.com/privacy-scaling-explorations/halo2.git"]
+halo2_proofs = { git = "https://github.com/scroll-tech/halo2.git", branch = "develop"  }
+[patch."https://github.com/privacy-scaling-explorations/poseidon.git"]
+poseidon = { git = "https://github.com/scroll-tech/poseidon.git", branch = "scroll-dev-0220" }
+[patch."https://github.com/privacy-scaling-explorations/halo2wrong.git"]
+halo2wrong = { git = "https://github.com/scroll-tech/halo2wrong.git", branch = "halo2-ecc-snark-verifier-0323" }
+maingate = { git = "https://github.com/scroll-tech/halo2wrong", branch = "halo2-ecc-snark-verifier-0323" }
+[patch."https://github.com/privacy-scaling-explorations/halo2curves.git"]
+halo2curves = { git = "https://github.com/scroll-tech/halo2curves.git", branch = "0.3.1-derive-serde" }
+
+
