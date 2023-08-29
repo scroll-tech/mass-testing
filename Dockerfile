@@ -2,8 +2,12 @@ FROM scrolltech/go-rust-builder as builder
 
 RUN mkdir -p /root/src
 ADD . /root/src
-RUN cargo build --release --bin testnet-runner
-RUN cd /root/src/target/release && find -name libzktrie.so | xargs -I {} cp {} /root/src/target/release
+RUN <<EOF 
+cd /root/src
+cargo build --release --bin testnet-runner
+cd target/release
+find -name libzktrie.so | xargs -I {} cp {} /root/src/target/release
+EOF
 
 FROM builder
 
