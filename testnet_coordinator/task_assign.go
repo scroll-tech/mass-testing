@@ -82,11 +82,12 @@ type randomTaskHolder struct {
 }
 
 func genRandom(beg, end_in uint64) randomTaskHolder {
-	rsrc := rand.NewSource(int64(beg))
-	rnd := rand.New(rsrc)
 	if end_in == indexUnSet {
 		panic("must set end index")
 	}
+
+	rsrc := rand.NewSource(int64(end_in))
+	rnd := rand.New(rsrc)
 
 	taskList := make([]uint64, end_in-beg+1)
 	taskLookup := make(map[uint64]uint64)
