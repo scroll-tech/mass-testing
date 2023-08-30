@@ -4,6 +4,7 @@ import (
 	"crypto/sha1"
 	"encoding/binary"
 	"log"
+	"math/rand"
 	"sort"
 	"sync"
 )
@@ -47,14 +48,92 @@ func (sp *sampling) sampleInt(n int64) bool {
 	return (sum32 & samplingBitMask) > sp.ratioMark
 }
 
+type taskHolder interface {
+	taskRange() (uint64, uint64)
+	pick(seq uint64) (bool, uint64)
+	revCheck(task uint64) (bool, uint64)
+}
+
+type seqTaskHolder struct {
+	begin_with uint64
+	end_in     uint64
+}
+
+func (st seqTaskHolder) taskRange() (uint64, uint64) {
+	return st.begin_with, st.end_in
+}
+
+func (st seqTaskHolder) pick(seq uint64) (bool, uint64) {
+	pickId := seq + st.begin_with
+	return pickId <= st.end_in, pickId
+}
+
+func (st seqTaskHolder) revCheck(task uint64) (bool, uint64) {
+	if task < st.begin_with {
+		return false, 0
+	}
+	return task <= st.end_in, task - st.begin_with
+}
+
+type randomTaskHolder struct {
+	seqTaskHolder
+	taskList   []uint64
+	taskLookup map[uint64]uint64
+}
+
+func genRandom(beg, end_in uint64) randomTaskHolder {
+	rsrc := rand.NewSource(int64(beg))
+	rnd := rand.New(rsrc)
+	if end_in == indexUnSet {
+		panic("must set end index")
+	}
+
+	taskList := make([]uint64, end_in-beg+1)
+	taskLookup := make(map[uint64]uint64)
+	for i := range taskList {
+		taskList[i] = beg + uint64(i)
+	}
+
+	rnd.Shuffle(len(taskList), func(i, j int) {
+		tmp := taskList[j]
+		taskList[j] = taskList[i]
+		taskList[i] = tmp
+	})
+
+	for i, v := range taskList {
+		taskLookup[v] = uint64(i)
+	}
+
+	return randomTaskHolder{
+		seqTaskHolder: seqTaskHolder{
+			begin_with: beg,
+			end_in:     end_in,
+		},
+		taskList:   taskList,
+		taskLookup: taskLookup,
+	}
+}
+
+func (rt randomTaskHolder) pick(seq uint64) (bool, uint64) {
+	valid, fallback := rt.seqTaskHolder.pick(seq)
+	if !valid {
+		return valid, fallback
+	}
+	return true, rt.taskList[seq]
+}
+
+func (rt randomTaskHolder) revCheck(task uint64) (bool, uint64) {
+	seq, valid := rt.taskLookup[task]
+	return valid, seq
+}
+
 // task managers cache all task it has assigned
 // since the cost is trivial (batch number is limited)
 type TaskAssigner struct {
 	sync.Mutex
 	notifier
 	stop_assign bool
-	begin_with  uint64
-	end_in      uint64
+	tasks       taskHolder
 	progress    uint64
 	sampler     *sampling
 	runingTasks map[uint64]TaskStatus
@@ -62,15 +141,21 @@ type TaskAssigner struct {
 
 func construct(start uint64) *TaskAssigner {
 	return &TaskAssigner{
-		begin_with:  start,
-		end_in:      indexUnSet,
-		progress:    start,
+		progress:    0,
 		runingTasks: make(map[uint64]TaskStatus),
+		tasks: seqTaskHolder{
+			begin_with: start,
+			end_in:     indexUnSet,
+		},
 	}
 }
 
 func (t *TaskAssigner) setEnd(n uint64) *TaskAssigner {
-	t.end_in = n
+	beg, _ := t.tasks.taskRange()
+	t.tasks = seqTaskHolder{
+		begin_with: beg,
+		end_in:     n,
+	}
 	return t
 }
 
@@ -88,6 +173,13 @@ func (t *TaskAssigner) setSampling(ratio float32) *TaskAssigner {
 	return t
 }
 
+func (t *TaskAssigner) setShuffle() *TaskAssigner {
+
+	beg, ed := t.tasks.taskRange()
+	t.tasks = genRandom(beg, ed)
+	return t
+}
+
 func (t *TaskAssigner) stopAssignment(stop bool) {
 	t.Lock()
 	defer t.Unlock()
@@ -98,7 +190,8 @@ func (t *TaskAssigner) isStopped() bool {
 
 	t.Lock()
 	defer t.Unlock()
-	return t.stop_assign || t.progress > t.end_in
+	hasTask, _ := t.tasks.pick(t.progress)
+	return t.stop_assign && hasTask
 }
 
 func (t *TaskAssigner) assign_new() uint64 {
@@ -129,7 +222,8 @@ func (t *TaskAssigner) assign_new() uint64 {
 	}
 
 	t.runingTasks[target] = TaskAssigned
-	return target
+	_, pickedId := t.tasks.pick(target)
+	return pickedId
 }
 
 func (t *TaskAssigner) drop(id uint64) {
@@ -137,8 +231,13 @@ func (t *TaskAssigner) drop(id uint64) {
 	t.Lock()
 	defer t.Unlock()
 
+	valid, seq := t.tasks.revCheck(id)
+	if !valid {
+		log.Printf("invalid id %d\n", id)
+	}
+
 	for tid, status := range t.runingTasks {
-		if tid == id {
+		if tid == seq {
 			if status == TaskAssigned {
 				t.runingTasks[tid] = TaskReAssign
 			} else {
@@ -154,18 +253,30 @@ func (t *TaskAssigner) reset(id uint64) {
 
 	t.Lock()
 	defer t.Unlock()
-	t.runingTasks[id] = TaskReAssign
+
+	valid, seq := t.tasks.revCheck(id)
+	if !valid {
+		log.Printf("invalid id %d\n", id)
+	}
+
+	t.runingTasks[seq] = TaskReAssign
 	log.Printf("enforce reset a task (%d)\n", id)
 }
 
 func (t *TaskAssigner) complete(id uint64) (bool, uint64) {
 	t.Lock()
 	defer t.Unlock()
-	if _, existed := t.runingTasks[id]; !existed {
+
+	valid, seq := t.tasks.revCheck(id)
+	if !valid {
+		log.Printf("invalid id %d\n", id)
+	}
+
+	if _, existed := t.runingTasks[seq]; !existed {
 		log.Printf("unexpected completed task (%d)\n", id)
 		return false, t.progress
 	}
-	t.runingTasks[id] = TaskCompleted
+	t.runingTasks[seq] = TaskCompleted
 
 	// scan all tasks and make progress
 	completed := []uint64{}
@@ -181,8 +292,6 @@ func (t *TaskAssigner) complete(id uint64) (bool, uint64) {
 		return completed[i] < completed[j]
 	})
 
-	log.Printf("collect completed (%v), now %d\n", completed, t.progress)
-
 	for _, id := range completed {
 		if id == nowProg {
 			delete(t.runingTasks, id)
@@ -195,6 +304,7 @@ func (t *TaskAssigner) complete(id uint64) (bool, uint64) {
 	}
 
 	defer func(newProg uint64) {
+		log.Printf("collect completed (%v), now %d, to %d\n", completed, t.progress, newProg)
 		t.progress = newProg
 	}(nowProg)
 
@@ -211,7 +321,8 @@ func (t *TaskAssigner) status() (result []uint64, workRange [2]uint64) {
 
 	for id, status := range t.runingTasks {
 		if status != TaskCompleted {
-			result = append(result, id)
+			_, tid := t.tasks.pick(id)
+			result = append(result, tid)
 		}
 		if id >= workRange[1] {
 			workRange[1] = id

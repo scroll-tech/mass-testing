@@ -39,6 +39,10 @@ func main() {
 	if serverConfig.EndBatch != 0 {
 		taskAssigner.setEnd(serverConfig.EndBatch)
 	}
+	if serverConfig.Shuffle {
+		log.Println("task has been shuffled")
+		taskAssigner.setShuffle()
+	}
 	if serverConfig.Sampling != 0 {
 		taskAssigner.setSampling(serverConfig.Sampling)
 		log.Println("set sampling", taskAssigner.sampler)
@@ -154,7 +158,7 @@ func taskHandler(assigner *TaskAssigner) http.HandlerFunc {
 				return
 			}
 			if prog, now := assigner.complete(ind); prog {
-				assigner.coordinatorNotify(fmt.Sprintf("we have progress to batch %d", now), COORDINATOR_GOODJOB)
+				assigner.coordinatorNotify(fmt.Sprintf("we have completed %d batches", now), COORDINATOR_GOODJOB)
 			}
 		} else if drop_index != "" {
 			log.Println("receive drop notify for batch:", drop_index)
