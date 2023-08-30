@@ -69,7 +69,7 @@ function check_output {
       chunk_name=`echo "$chunk_dir" | grep -oE '[^/]+$'`
       echo "${chunk_name} fail (${chunk_dir})"
       curl -s "${COORDINATOR_API_URL}nodewarning?chunk_issue=${chunk_name}"
-      mv ${chunk_dir} ${issue_dir}
+      cp -r ${chunk_dir} ${issue_dir}
     fi
   done
   set +e
@@ -78,7 +78,7 @@ function check_output {
 set +e
 while true; do
 # clean output dir before each running
-  rm -rf ${output_dir}/*
+#  rm -rf ${output_dir}/*
   if [ -z "${DEBUG_RUN:-}" ]; then
     testnet-runner
     exit_code=$?
