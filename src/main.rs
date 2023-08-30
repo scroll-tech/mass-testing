@@ -1,5 +1,5 @@
 #![allow(dead_code)]
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use ethers_providers::{Http, Provider};
 use log4rs::{
     append::{
@@ -9,17 +9,54 @@ use log4rs::{
     config::{Appender, Config, Logger, Root},
 };
 use prover::{
+    config::LayerId,
     inner::Prover,
+    test_util::{gen_and_verify_normal_and_evm_proofs, PARAMS_DIR},
     utils::{read_env_var, short_git_version, GIT_VERSION},
-    zkevm::circuit::{
-        block_traces_to_witness_block, calculate_row_usage_of_witness_block, SuperCircuit,
-        WitnessBlock,
+    zkevm::{
+        self,
+        circuit::{
+            block_traces_to_witness_block, calculate_row_usage_of_witness_block, SuperCircuit,
+            WitnessBlock,
+        },
     },
 };
 use reqwest::Url;
 use serde::Deserialize;
 use std::{backtrace, env, panic, process::ExitCode, str::FromStr};
 use types::eth::BlockTrace;
+
+// Must set ENV SCROLL_PROVER_ASSETS_DIR for config files and
+// SCROLL_PROVER_PARAMS_DIR for param files.
+fn chunk_prove(witness_block: &WitnessBlock) -> Result<()> {
+    // TODO: replace to one global chunk-prover.
+    let params_dir = read_env_var("SCROLL_PROVER_PARAMS_DIR", PARAMS_DIR.to_string());
+    let mut prover = zkevm::Prover::from_params_dir(&params_dir);
+
+    panic::catch_unwind(move || {
+        let layer1_snark = prover
+            .inner
+            .load_or_gen_last_chunk_snark("layer1", witness_block, None)
+            .unwrap();
+        log::info!("Generated layer1 snark");
+
+        gen_and_verify_normal_and_evm_proofs(
+            &mut prover.inner,
+            LayerId::Layer2,
+            layer1_snark,
+            None,
+        );
+        log::info!("Generated and verified chunk-proof");
+    })
+    .map_err(|err| {
+        let err_msg = if let Some(err_msg) = err.downcast_ref::<String>() {
+            err_msg
+        } else {
+            "unknown"
+        };
+        anyhow!("Failed to generate or verify chunk-proof: {err_msg}")
+    })
+}
 
 // build common config from enviroment
 fn common_log() -> Result<Config> {
@@ -256,9 +293,8 @@ async fn main() -> ExitCode {
                     }
 
                     // prove
-                    if spec_tasks.iter().any(|str| str.as_str() == "mock") {
-                        // TODO: add prove code here
-                        let prove_ret: Result<()> = Ok(());
+                    if spec_tasks.iter().any(|str| str.as_str() == "prove") {
+                        let prove_ret = chunk_prove(&witness_block);
                         if let Err(e) = prove_ret {
                             write_error(&out_err, format!("chunk handling fail: {e:?}"));
                             return false;
@@ -437,5 +473,24 @@ impl Setting {
             task_url: task_url.as_str().into(),
             spec_tasks,
         }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use prover::{test_util::load_block_traces_for_test, utils::init_env_and_log};
+
+    // Long running test on GPU
+    #[ignore]
+    #[test]
+    fn test_chunk_prove() {
+        init_env_and_log("chunk_tests");
+
+        let block_traces = load_block_traces_for_test().1;
+        let witness_block = block_traces_to_witness_block(&block_traces).unwrap();
+
+        let result = chunk_prove(&witness_block);
+        assert!(result.is_ok());
     }
 }
