@@ -11,8 +11,9 @@ popd
 popd
 EOF
 
-FROM builder
-
+FROM ubuntu:20.04
+ 
+RUN apt update && apt install -y curl
 COPY --from=builder /root/src/target/release/testnet-runner /bin/
 COPY --from=builder /root/src/run.sh /bin/testnet-runner.sh
 COPY --from=builder /root/src/target/release/libzktrie.so /usr/local/lib
