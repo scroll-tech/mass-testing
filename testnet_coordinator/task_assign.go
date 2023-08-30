@@ -1,8 +1,8 @@
 package main
 
 import (
+	"crypto/sha1"
 	"encoding/binary"
-	"hash/fnv"
 	"log"
 	"sort"
 	"sync"
@@ -41,10 +41,10 @@ func (sp *sampling) sampleInt(n int64) bool {
 	for i, b := range bt {
 		bt[i] = b ^ sp.seedByte[i]
 	}
-	h := fnv.New32a()
+	h := sha1.New()
 	h.Write(bt)
-	log.Println("bt sampling:", bt, h.Sum32())
-	return (h.Sum32() & samplingBitMask) > sp.ratioMark
+	sum32 := binary.BigEndian.Uint32(h.Sum(nil))
+	return (sum32 & samplingBitMask) > sp.ratioMark
 }
 
 // task managers cache all task it has assigned
@@ -84,7 +84,7 @@ func (t *TaskAssigner) setMessenger(url string, id int) *TaskAssigner {
 
 func (t *TaskAssigner) setSampling(ratio float32) *TaskAssigner {
 
-	t.sampler = newSampling(ratio).setSeed(t.end_in)
+	t.sampler = newSampling(ratio) //.setSeed(t.end_in)
 	return t
 }
 
@@ -119,11 +119,12 @@ func (t *TaskAssigner) assign_new() uint64 {
 	upProgress := target == t.progress
 	if t.sampler != nil {
 		for !t.sampler.sampleInt(int64(target)) {
-			t.runingTasks[target] = TaskCompleted
+			if upProgress {
+				t.progress++
+			} else {
+				t.runingTasks[target] = TaskCompleted
+			}
 			target++
-		}
-		if upProgress {
-			t.progress = target
 		}
 	}
 
