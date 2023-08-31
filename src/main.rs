@@ -1,5 +1,5 @@
 #![allow(dead_code)]
-use anyhow::{anyhow, Result};
+use anyhow::Result;
 use ethers_providers::{Http, Provider};
 use log4rs::{
     append::{
@@ -33,29 +33,15 @@ fn chunk_prove(witness_block: &WitnessBlock) -> Result<()> {
     let params_dir = read_env_var("SCROLL_PROVER_PARAMS_DIR", PARAMS_DIR.to_string());
     let mut prover = zkevm::Prover::from_params_dir(&params_dir);
 
-    panic::catch_unwind(move || {
-        let layer1_snark = prover
-            .inner
-            .load_or_gen_last_chunk_snark("layer1", witness_block, None)
-            .unwrap();
-        log::info!("Generated layer1 snark");
+    let layer1_snark = prover
+        .inner
+        .load_or_gen_last_chunk_snark("layer1", witness_block, None)?;
+    log::info!("Generated layer1 snark");
 
-        gen_and_verify_normal_and_evm_proofs(
-            &mut prover.inner,
-            LayerId::Layer2,
-            layer1_snark,
-            None,
-        );
-        log::info!("Generated and verified chunk-proof");
-    })
-    .map_err(|err| {
-        let err_msg = if let Some(err_msg) = err.downcast_ref::<String>() {
-            err_msg
-        } else {
-            "unknown"
-        };
-        anyhow!("Failed to generate or verify chunk-proof: {err_msg}")
-    })
+    gen_and_verify_normal_and_evm_proofs(&mut prover.inner, LayerId::Layer2, layer1_snark, None);
+    log::info!("Generated and verified chunk-proof");
+
+    Ok(())
 }
 
 // build common config from enviroment
