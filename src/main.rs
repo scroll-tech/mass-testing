@@ -57,7 +57,7 @@ fn debug_log(output_dir: &str) -> Result<Config> {
         .build(
             Root::builder()
                 .appender("log-file")
-                .build(log::LevelFilter::Trace),
+                .build(log::LevelFilter::Debug),
         )?;
 
     Ok(config)
