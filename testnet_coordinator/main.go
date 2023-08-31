@@ -39,6 +39,9 @@ func main() {
 	if serverConfig.EndBatch != 0 {
 		taskAssigner.setEnd(serverConfig.EndBatch)
 	}
+	if serverConfig.Continue > serverConfig.StartBatch {
+		taskAssigner.setContinue(serverConfig.Continue)
+	}
 	if serverConfig.Shuffle {
 		log.Println("task has been shuffled")
 		taskAssigner.setShuffle()
@@ -99,14 +102,16 @@ func chunksHandler(assigner *TaskAssigner, url_template string) http.HandlerFunc
 			}
 			w.WriteHeader(http.StatusOK)
 			return
-		} else if assigner.isStopped() {
+		}
+
+		assigned_done := false
+		valid, assigned := assigner.assign_new()
+		if !valid {
 			log.Println("stop assignment")
 			http.Error(w, "assignment stopped", http.StatusForbidden)
 			return
 		}
 
-		assigned_done := false
-		assigned := assigner.assign_new()
 		defer func(agent string) {
 			log.Println("send new batch out", assigned, assigned_done)
 			if !assigned_done {

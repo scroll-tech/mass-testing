@@ -13,14 +13,15 @@ type ServerConfig struct {
 }
 
 type Config struct {
-	StartBatch       uint64        `yaml:"start,omitempty"`
+	StartBatch       uint64        `yaml:"start"`
 	EndBatch         uint64        `yaml:"end,omitempty"`
+	Continue         uint64        `yaml:"continue,omitempty"`
 	Sampling         float32       `yaml:"sampling,omitempty"`
 	Shuffle          bool          `yaml:"shuffle,omitempty"`
 	GroupID          int           `yaml:"group_id,omitempty"`
 	ProxyOnly        bool          `yaml:"proxy_only,omitempty"`
 	ChunkURLTemplate string        `yaml:"chunkURL"`
-	NotifierURL      string        `yaml:"notifierURL"`
+	NotifierURL      string        `yaml:"notifierURL,omitempty"`
 	Server           *ServerConfig `yaml:"server,omitempty"`
 }
 

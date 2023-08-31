@@ -86,7 +86,7 @@ func genRandom(beg, end_in uint64) randomTaskHolder {
 		panic("must set end index")
 	}
 
-	rsrc := rand.NewSource(int64(end_in))
+	rsrc := rand.NewSource(int64((beg << 32) + end_in))
 	rnd := rand.New(rsrc)
 
 	taskList := make([]uint64, end_in-beg+1)
@@ -118,6 +118,7 @@ func genRandom(beg, end_in uint64) randomTaskHolder {
 func (rt randomTaskHolder) pick(seq uint64) (bool, uint64) {
 	valid, fallback := rt.seqTaskHolder.pick(seq)
 	if !valid {
+		log.Println("random task has been falled back to out-of-range id", fallback)
 		return valid, fallback
 	}
 	return true, rt.taskList[seq]
@@ -151,8 +152,20 @@ func construct(start uint64) *TaskAssigner {
 	}
 }
 
+func (t *TaskAssigner) setContinue(n uint64) *TaskAssigner {
+	beg, _ := t.tasks.taskRange()
+	if n < beg {
+		panic("invalid continue value: less than beginning")
+	}
+	t.progress = n
+	return t
+}
+
 func (t *TaskAssigner) setEnd(n uint64) *TaskAssigner {
 	beg, _ := t.tasks.taskRange()
+	if n < beg {
+		panic("invalid end value: less than beginning")
+	}
 	t.tasks = seqTaskHolder{
 		begin_with: beg,
 		end_in:     n,
@@ -187,26 +200,23 @@ func (t *TaskAssigner) stopAssignment(stop bool) {
 	t.stop_assign = stop
 }
 
-func (t *TaskAssigner) isStopped() bool {
+func (t *TaskAssigner) assign_new() (bool, uint64) {
 
 	t.Lock()
 	defer t.Unlock()
-	hasTask, _ := t.tasks.pick(t.progress)
-	return t.stop_assign && hasTask
-}
 
-func (t *TaskAssigner) assign_new() uint64 {
-
-	t.Lock()
-	defer t.Unlock()
+	if t.stop_assign {
+		return false, 0
+	}
 
 	target := t.progress
-	for tid, status := range t.runingTasks {
+	for targetI, status := range t.runingTasks {
 		if status == TaskReAssign {
-			t.runingTasks[tid] = TaskAssigned
-			return tid
-		} else if tid >= target {
-			target = tid + 1
+			t.runingTasks[targetI] = TaskAssigned
+			_, tid := t.tasks.pick(target)
+			return true, tid
+		} else if targetI >= target {
+			target = targetI + 1
 		}
 	}
 
@@ -222,9 +232,11 @@ func (t *TaskAssigner) assign_new() uint64 {
 		}
 	}
 
-	t.runingTasks[target] = TaskAssigned
-	_, pickedId := t.tasks.pick(target)
-	return pickedId
+	valid, tid := t.tasks.pick(target)
+	if valid {
+		t.runingTasks[target] = TaskAssigned
+	}
+	return valid, tid
 }
 
 func (t *TaskAssigner) drop(id uint64) {
