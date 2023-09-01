@@ -153,10 +153,6 @@ func construct(start uint64) *TaskAssigner {
 }
 
 func (t *TaskAssigner) setContinue(n uint64) *TaskAssigner {
-	beg, _ := t.tasks.taskRange()
-	if n < beg {
-		panic("invalid continue value: less than beginning")
-	}
 	t.progress = n
 	return t
 }

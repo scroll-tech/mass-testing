@@ -39,7 +39,8 @@ func main() {
 	if serverConfig.EndBatch != 0 {
 		taskAssigner.setEnd(serverConfig.EndBatch)
 	}
-	if serverConfig.Continue > serverConfig.StartBatch {
+	if serverConfig.Continue > 0 {
+		log.Println("set progress to", serverConfig.Continue)
 		taskAssigner.setContinue(serverConfig.Continue)
 	}
 	if serverConfig.Shuffle {
