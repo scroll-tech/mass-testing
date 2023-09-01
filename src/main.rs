@@ -234,94 +234,80 @@ async fn main() -> ExitCode {
                 }
                 let chunk_dir = chunk_dir.expect("ok ensured");
 
-                let handling_error = std::sync::Arc::new(std::sync::RwLock::new(String::from(
+                let panic_message = std::sync::Arc::new(std::sync::RwLock::new(String::from(
                     "unknown error, message not recorded",
                 )));
 
-                let write_error = |handling_error: &std::sync::Arc<std::sync::RwLock<String>>,
-                                   err_msg: String| {
-                    match handling_error.write() {
+                // prepare for running test phase
+                let out_err = panic_message.clone();
+                panic::set_hook(Box::new(move |panic_info| {
+                    let err_msg = format!(
+                        "{} \nbacktrace: {}",
+                        panic_info,
+                        backtrace::Backtrace::capture(),
+                    );
+
+                    match out_err.write() {
                         Ok(mut error_str) => {
                             *error_str = err_msg;
                         }
                         Err(e) => {
                             log::error!(
-                                "fail to write error message: {:?}\n backup {}",
+                                "fail to write error message: {:?}\n backup testnet panic {}",
                                 e,
                                 err_msg
                             );
                         }
                     }
-                };
-
-                let out_err = handling_error.clone();
-                // prepare for running test phase
-                panic::set_hook(Box::new(move |panic_info| {
-                    write_error(
-                        &out_err,
-                        format!(
-                            "catch test panic: {} \nbacktrace: {}",
-                            panic_info,
-                            backtrace::Backtrace::capture(),
-                        ),
-                    );
                 }));
 
                 let spec_tasks = setting.spec_tasks.clone();
 
-                let out_err = handling_error.clone();
                 let handling_ret = panic::catch_unwind(move || {
                     let witness_block = build_block(&block_traces, batch_id, chunk_id)
-                        .map_err(|e| anyhow::anyhow!("testnet: building block failed {e:?}"));
-
-                    if let Err(e) = witness_block {
-                        write_error(&out_err, format!("building block fail: {e:?}"));
-                        return false;
-                    }
-                    let witness_block = witness_block.expect("has handled error");
+                        .map_err(|e| anyhow::anyhow!("testnet: building block failed {e:?}"))?;
 
                     // mock
                     if spec_tasks.iter().any(|str| str.as_str() == "mock") {
-                        if let Err(e) = Prover::<SuperCircuit>::mock_prove_witness_block(&witness_block)
+                        Prover::<SuperCircuit>::mock_prove_witness_block(&witness_block)
                         .map_err(|e| {
-                            anyhow::anyhow!("testnet: failed to prove chunk {chunk_id} inside batch {batch_id}:\n{e:?}")
-                        })
-                        {
-                            write_error(&out_err, format!("chunk handling fail: {e:?}"));
-                            return false;
-                        }
+                            anyhow::anyhow!("testnet: failed to mock prove chunk {chunk_id} inside batch {batch_id}:\n{e:?}")
+                        })?;
                     }
 
                     // prove
                     if spec_tasks.iter().any(|str| str.as_str() == "prove") {
-                        let prove_ret = chunk_prove(&witness_block);
-                        if let Err(e) = prove_ret {
-                            write_error(&out_err, format!("chunk handling fail: {e:?}"));
-                            return false;
-                        }
+                        chunk_prove(&witness_block)
+                        .map_err(|e| {
+                            anyhow::anyhow!("testnet: failed to prove chunk {chunk_id} inside batch {batch_id}:\n{e:?}")
+                        })?;
                     }
-                    true
+                    Ok(())
                 });
 
                 let _ = panic::take_hook();
 
+                // this can not be handled gracefully
                 log_handle.set_config(common_log().unwrap());
-                if !handling_ret.unwrap_or(false) {
-                    log::debug!("encounter some error in batch {}", batch_id);
-                    if let Err(e) = mark_chunk_failure(
-                        &chunk_dir,
-                        handling_error
+
+                if let Err(e) = handling_ret
+                    .map_err(|_| {
+                        // panic and we catch it in `panic_message`
+                        let err_msg = panic_message
                             .read()
                             .map(|reader| reader.clone())
-                            .unwrap_or(String::from("default"))
-                            .as_str(),
-                    ) {
+                            .unwrap_or(String::from("can not access panic_message"));
+                        anyhow!("testnet panic: {}", err_msg)
+                    })
+                    .and_then(|r| r)
+                {
+                    log::info!("encounter some error in batch {}", batch_id);
+                    if let Err(e) = mark_chunk_failure(&chunk_dir, &e.to_string()) {
                         log::error!("can not output error data for chunk {}: {:?}", chunk_id, e);
                         chunks_task_complete = false;
                         break;
                     }
                 }
-
                 log::info!("chunk {} has been handled", chunk_id);
             }
         }
