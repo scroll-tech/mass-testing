@@ -1,8 +1,9 @@
 version: '3'
 services:
-  rpc-monitor:
+  test-runner:
     build:
       context: ./
+      dockerfile: Dockerfile.deploy
     container_name: mass-testing-runner
     env_file:
      - /home/ubuntu/tool/export

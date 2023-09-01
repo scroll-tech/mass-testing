@@ -88,7 +88,7 @@ fn debug_log(output_dir: &str) -> Result<Config> {
         .logger(
             Logger::builder()
                 .appender("std")
-                .additive(false)
+                .additive(true)
                 .build("testnet_runner", log::LevelFilter::Info),
         )
         .build(
