@@ -209,7 +209,7 @@ func (t *TaskAssigner) assign_new() (bool, uint64) {
 	for targetI, status := range t.runingTasks {
 		if status == TaskReAssign {
 			t.runingTasks[targetI] = TaskAssigned
-			_, tid := t.tasks.pick(target)
+			_, tid := t.tasks.pick(targetI)
 			return true, tid
 		} else if targetI >= target {
 			target = targetI + 1
@@ -244,6 +244,7 @@ func (t *TaskAssigner) drop(id uint64) {
 	if !valid {
 		log.Printf("invalid id %d\n", id)
 	}
+	log.Println("drop", seq, id)
 
 	for tid, status := range t.runingTasks {
 		if tid == seq {
