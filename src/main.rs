@@ -33,29 +33,15 @@ fn chunk_prove(witness_block: &WitnessBlock) -> Result<()> {
     let params_dir = read_env_var("SCROLL_PROVER_PARAMS_DIR", PARAMS_DIR.to_string());
     let mut prover = zkevm::Prover::from_params_dir(&params_dir);
 
-    panic::catch_unwind(move || {
-        let layer1_snark = prover
-            .inner
-            .load_or_gen_last_chunk_snark("layer1", witness_block, None)
-            .unwrap();
-        log::info!("Generated layer1 snark");
+    let layer1_snark = prover
+        .inner
+        .load_or_gen_last_chunk_snark("layer1", witness_block, None)?;
+    log::info!("Generated layer1 snark");
 
-        gen_and_verify_normal_and_evm_proofs(
-            &mut prover.inner,
-            LayerId::Layer2,
-            layer1_snark,
-            None,
-        );
-        log::info!("Generated and verified chunk-proof");
-    })
-    .map_err(|err| {
-        let err_msg = if let Some(err_msg) = err.downcast_ref::<String>() {
-            err_msg
-        } else {
-            "unknown"
-        };
-        anyhow!("Failed to generate or verify chunk-proof: {err_msg}")
-    })
+    gen_and_verify_normal_and_evm_proofs(&mut prover.inner, LayerId::Layer2, layer1_snark, None);
+    log::info!("Generated and verified chunk-proof");
+
+    Ok(())
 }
 
 // build common config from enviroment
@@ -101,9 +87,12 @@ fn debug_log(output_dir: &str) -> Result<Config> {
 }
 
 fn prepare_chunk_dir(output_dir: &str, chunk_id: u64) -> Result<String> {
-    use std::{fs, path::Path};
+    use std::{fs, io::ErrorKind, path::Path};
     let chunk_path = Path::new(output_dir).join(format!("{chunk_id}"));
-    fs::create_dir(chunk_path.as_path())?;
+    fs::create_dir(chunk_path.as_path()).or_else(|e| match e.kind() {
+        ErrorKind::AlreadyExists => fs::metadata(chunk_path.as_path()).map(|_| ()),
+        _ => Err(e),
+    })?;
     Ok(chunk_path
         .to_str()
         .ok_or_else(|| anyhow::anyhow!("invalid chunk path"))?
