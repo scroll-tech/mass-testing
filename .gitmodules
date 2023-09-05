@@ -1,0 +1,3 @@
+[submodule "halo2-gpu"]
+        path = halo2-gpu
+        url = git@github.com:scroll-tech/halo2-gpu.git
