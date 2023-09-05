@@ -8,6 +8,7 @@ use log4rs::{
     },
     config::{Appender, Config, Logger, Root},
 };
+use once_cell::sync::Lazy;
 use prover::{
     config::LayerId,
     inner::Prover,
@@ -26,12 +27,18 @@ use serde::Deserialize;
 use std::{backtrace, env, panic, process::ExitCode, str::FromStr};
 use types::eth::BlockTrace;
 
+static mut CHUNK_PROVER: Lazy<zkevm::Prover> = Lazy::new(|| {
+    let params_dir = read_env_var("SCROLL_PROVER_PARAMS_DIR", PARAMS_DIR.to_string());
+    let prover = zkevm::Prover::from_params_dir(&params_dir);
+    log::info!("Constructed chunk-prover");
+
+    prover
+});
+
 // Must set ENV SCROLL_PROVER_ASSETS_DIR for config files and
 // SCROLL_PROVER_PARAMS_DIR for param files.
 fn chunk_prove(witness_block: &WitnessBlock) -> Result<()> {
-    // TODO: replace to one global chunk-prover.
-    let params_dir = read_env_var("SCROLL_PROVER_PARAMS_DIR", PARAMS_DIR.to_string());
-    let mut prover = zkevm::Prover::from_params_dir(&params_dir);
+    let prover = unsafe { &mut CHUNK_PROVER };
 
     let layer1_snark = prover
         .inner

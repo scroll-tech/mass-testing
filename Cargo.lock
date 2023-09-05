@@ -3970,6 +3970,7 @@ dependencies = [
  "itertools",
  "log",
  "log4rs",
+ "once_cell",
  "prover",
  "reqwest",
  "serde",
