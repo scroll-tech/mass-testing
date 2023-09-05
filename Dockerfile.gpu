@@ -3,19 +3,9 @@ FROM scrolltech/cuda-go-rust-builder:cuda-11.7.1-go-1.19-rust-nightly-2022-12-10
 ENV LD_LIBRARY_PATH /usr/local/cuda/lib64:$LD_LIBRARY_PATH
 RUN mkdir -p /root/src
 ADD . /root/src
-RUN <<EOF bash
-pushd /root/src
-mkdir .cargo
-echo 'paths = ["/root/src/halo2-gpu/halo2_proofs"]' > .cargo/config
-cargo build --release --bin testnet-runner
-popd
-EOF
-
-RUN <<EOF bash
-pushd /root/src/target/release
-find -name libzktrie.so | xargs -I {} cp {} ./
-popd
-EOF
+RUN cd /root/src && mkdir .cargo && echo 'paths = ["/root/src/halo2-gpu/halo2_proofs"]' > .cargo/config
+RUN cd /root/src && cargo build --release --bin testnet-runner
+RUN cd /root/src/target/release && find -name libzktrie.so | xargs -I {} cp {} ./
 
 FROM nvidia/cuda:11.7.1-runtime-ubuntu22.04
 
