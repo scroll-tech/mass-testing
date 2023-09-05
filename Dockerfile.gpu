@@ -1,27 +1,30 @@
 FROM scrolltech/cuda-go-rust-builder:cuda-11.7.1-go-1.19-rust-nightly-2022-12-10 as builder
 
-WORKDIR /
-COPY halo2-gpu /halo2-gpu
-RUN echo 'paths = ["/halo2-gpu/halo2_proofs"]' > /root/.cargo/config
 ENV LD_LIBRARY_PATH /usr/local/cuda/lib64:$LD_LIBRARY_PATH
-
 RUN mkdir -p /root/src
 ADD . /root/src
 RUN <<EOF bash
 pushd /root/src
+mkdir .cargo
+echo 'paths = ["/root/src/halo2-gpu/halo2_proofs"]' > .cargo/config
 cargo build --release --bin testnet-runner
-pushd ./target/release
-find -name libzktrie.so | xargs -I {} cp {} ./
 popd
+EOF
+
+RUN <<EOF bash
+pushd /root/src/target/release
+find -name libzktrie.so | xargs -I {} cp {} ./
 popd
 EOF
 
 FROM nvidia/cuda:11.7.1-runtime-ubuntu22.04
 
-WORKDIR /
+RUN apt update && apt install -y curl
+WORKDIR /opt
 COPY --from=builder /root/src/target/release/testnet-runner /bin/
-COPY --from=builder /root/src/run.sh /bin/testnet-runner.sh
 COPY --from=builder /root/src/target/release/libzktrie.so /usr/local/lib
-ENV LD_LIBRARY_PATH usr/local/cuda/lib64:$LD_LIBRARY_PATH
+COPY --from=builder /root/src/run.sh /opt/testnet-runner.sh
+ENV LD_LIBRARY_PATH /usr/local/cuda/lib64:/usr/local/lib:$LD_LIBRARY_PATH
+RUN mkdir issues
 
-CMD testnet-runner.sh
+CMD ./testnet-runner.sh

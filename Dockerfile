@@ -5,9 +5,12 @@ ADD . /root/src
 RUN <<EOF bash
 pushd /root/src
 cargo build --release --bin testnet-runner
-pushd ./target/release
-find -name libzktrie.so | xargs -I {} cp {} ./
 popd
+EOF
+
+RUN <<EOF bash
+pushd /root/src/target/release
+find -name libzktrie.so | xargs -I {} cp {} ./
 popd
 EOF
 
