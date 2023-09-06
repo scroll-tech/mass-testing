@@ -31,7 +31,8 @@ use types::eth::BlockTrace;
 fn chunk_prove(witness_block: &WitnessBlock) -> Result<()> {
     // TODO: replace to one global chunk-prover.
     let params_dir = read_env_var("SCROLL_PROVER_PARAMS_DIR", PARAMS_DIR.to_string());
-    let mut prover = zkevm::Prover::from_params_dir(&params_dir);
+    let assets_dir = read_env_var("SCROLL_PROVER_ASSETS_DIR", PARAMS_DIR.to_string());
+    let mut prover = zkevm::Prover::from_dirs(&params_dir, &assets_dir);
 
     let layer1_snark = prover
         .inner
