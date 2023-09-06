@@ -1,5 +1,6 @@
 #![allow(dead_code)]
-use anyhow::{anyhow, Result};
+use aggregator::CompressionCircuit;
+use anyhow::{anyhow, bail, Result};
 use ethers_providers::{Http, Provider};
 use log4rs::{
     append::{
@@ -9,9 +10,11 @@ use log4rs::{
     config::{Appender, Config, Logger, Root},
 };
 use prover::{
+    common,
     config::LayerId,
     inner::Prover,
-    test_util::{gen_and_verify_normal_and_evm_proofs, PARAMS_DIR},
+    test_util::PARAMS_DIR,
+    types::eth::BlockTrace,
     utils::{read_env_var, short_git_version, GIT_VERSION},
     zkevm::{
         self,
@@ -24,23 +27,35 @@ use prover::{
 use reqwest::Url;
 use serde::Deserialize;
 use std::{backtrace, env, panic, process::ExitCode, str::FromStr};
-use types::eth::BlockTrace;
 
 // Must set ENV SCROLL_PROVER_ASSETS_DIR for config files and
 // SCROLL_PROVER_PARAMS_DIR for param files.
-fn chunk_prove(witness_block: &WitnessBlock) -> Result<()> {
+fn chunk_prove(batch_id: i64, chunk_id: i64, witness_block: &WitnessBlock) -> Result<()> {
     // TODO: replace to one global chunk-prover.
     let params_dir = read_env_var("SCROLL_PROVER_PARAMS_DIR", PARAMS_DIR.to_string());
     let assets_dir = read_env_var("SCROLL_PROVER_ASSETS_DIR", PARAMS_DIR.to_string());
     let mut prover = zkevm::Prover::from_dirs(&params_dir, &assets_dir);
 
-    let layer1_snark = prover
+    // Generate chunk-snark.
+    let name = format!("batch_{batch_id}_chunk_{chunk_id}");
+    let chunk_snark = prover
         .inner
-        .load_or_gen_last_chunk_snark("layer1", witness_block, None)?;
-    log::info!("Generated layer1 snark");
+        .load_or_gen_final_chunk_snark(&name, &witness_block, None)?;
+    log::info!("{name}: generated chunk-snark");
 
-    gen_and_verify_normal_and_evm_proofs(&mut prover.inner, LayerId::Layer2, layer1_snark, None);
-    log::info!("Generated and verified chunk-proof");
+    // Verify chunk-snark.
+    env::set_var("COMPRESSION_CONFIG", LayerId::Layer2.config_path());
+    let pk = prover.inner.pk(LayerId::Layer2.id()).unwrap();
+    let vk = pk.get_vk().clone();
+    let params = prover.inner.params(LayerId::Layer2.degree()).clone();
+    let verifier = common::Verifier::<CompressionCircuit>::new(params, vk);
+    log::info!("{name}: Constructed common verifier");
+
+    let verified = verifier.verify_snark(chunk_snark);
+    if !verified {
+        bail!("{name}: failed to verify chunk-snark");
+    }
+    log::info!("{name}: verified normal proof");
 
     Ok(())
 }
@@ -267,7 +282,7 @@ async fn main() -> ExitCode {
 
                     // prove
                     if spec_tasks.iter().any(|str| str.as_str() == "prove") {
-                        chunk_prove(&witness_block)
+                        chunk_prove(batch_id, chunk_id, &witness_block)
                         .map_err(|e| {
                             anyhow::anyhow!("testnet: failed to prove chunk {chunk_id} inside batch {batch_id}:\n{e:?}")
                         })?;
@@ -466,7 +481,7 @@ mod test {
         let block_traces = load_block_traces_for_test().1;
         let witness_block = block_traces_to_witness_block(&block_traces).unwrap();
 
-        let result = chunk_prove(&witness_block);
+        let result = chunk_prove(1, 1, &witness_block);
         assert!(result.is_ok());
     }
 }
