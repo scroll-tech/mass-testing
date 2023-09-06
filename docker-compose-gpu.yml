@@ -10,7 +10,7 @@ services:
     container_name: mass-testing-runner-gpu
     #restart: unless-stopped
     env_file:
-     - /home/ubuntu/tool/export
+     - /opt/export
      - /srv/alpha-replay/public_env    
     environment:
       - TESTNET_TASKS=prove
