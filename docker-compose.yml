@@ -12,6 +12,7 @@ services:
 #     - OUTPUT_DIR=/replay/output
      - ISSUE_DIR=/replay/issues
      - TESTNET_TASKS=mock
+     - RUST_BACKTRACE=1
     command: ./wrap_group.sh
     # restart: on-failure
     # ports:

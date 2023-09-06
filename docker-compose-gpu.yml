@@ -1,18 +1,35 @@
 version: '3'
 services:
-  prover:
-    image: scrolltech/cuda-testnet-runner:xxx
+  test-runner:
+    build:
+      context: ./
+      args:
+        RUNNER_IMAGE: masstest-runner-gpu      
+      dockerfile: Dockerfile.deploy
     runtime: nvidia
-    container_name: testnet-runner
-    restart: unless-stopped
+    container_name: mass-testing-runner-gpu
+    #restart: unless-stopped
+    env_file:
+     - /home/ubuntu/tool/export
+     - /srv/alpha-replay/public_env    
     environment:
-      - L2GETH_API_URL=<geth entrypoint>
-      - COORDINATOR_API_URL=<coordinator url>
-      - TESTNET_TASKS=mock,prove,agg
-      - SCROLL_PROVER_ASSETS_DIR=/assets
-      - SCROLL_PROVER_PARAMS_DIR=/assets
+      - TESTNET_TASKS=prove
+      - ISSUE_DIR=/replay/issues
+      - SCROLL_PROVER_ASSETS_DIR=/opt/assets
+      - SCROLL_PROVER_PARAMS_DIR=/opt/params
       - RUST_MIN_STACK=100000000
       - CHAIN_ID=534351
-      - RUST_LOG=trace
+#      - RUST_LOG=trace
+      - RUST_BACKTRACE=1
+    command: ./wrap_group.sh
+    # restart: on-failure
+    # ports:
+    #   - 19100:8000
+    logging:
+      driver: json-file
+      options:
+        max-size: '100m'
+        max-file: '2'      
     volumes:
-      - ./assets:/assets
+      - /srv/alpha-replay/:/replay
+      - ./params:/opt/params

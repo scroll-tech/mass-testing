@@ -1,4 +1,5 @@
-FROM scrolltech/masstest-runner
+ARG RUNNER_IMAGE=scrolltech/masstest-runner
+FROM $RUNNER_IMAGE
 
 ADD run.sh /opt/testnet-runner.sh
 ADD wrap_group.sh /opt/
