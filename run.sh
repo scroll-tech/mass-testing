@@ -45,6 +45,14 @@ if [ ! -d "$output_dir" ]; then
   echo "Directory $output_dir created."
 fi
 
+if [ -n "${OUTPUT_EXPORT_DIR:-}" ]; then
+  output_export_dir="${OUTPUT_EXPORT_DIR}" 
+  if [ ! -d "$output_export_dir" ]; then
+    echo "output export dir must be created before running"
+    exit 1
+  fi
+fi
+
 
 issue_dir="${ISSUE_DIR:-issues}" 
 
@@ -52,6 +60,7 @@ if [ ! -d "$issue_dir" ]; then
   echo "issue dir must be created before running"
   exit 1
 fi
+
 
 # A function representing your command 'a'
 function debug_run {
@@ -70,8 +79,12 @@ function check_output {
       echo "${chunk_name} fail (${chunk_dir})"
       curl -s "${COORDINATOR_API_URL}nodewarning?chunk_issue=${chunk_name}"
       cp -r ${chunk_dir} ${issue_dir}
+      rm -f ${fail_file}
     fi
   done
+  if [ -n "${output_export_dir:-}" ]; then
+    mv ${output_dir}/* ${output_export_dir}
+  fi
   set +e
 }
 

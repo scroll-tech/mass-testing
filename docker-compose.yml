@@ -9,7 +9,6 @@ services:
      - /home/ubuntu/tool/export
      - /srv/alpha-replay/public_env
     environment:
-#     - OUTPUT_DIR=/replay/output
      - ISSUE_DIR=/replay/issues
      - TESTNET_TASKS=mock
      - RUST_BACKTRACE=1
