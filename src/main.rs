@@ -307,6 +307,12 @@ async fn main() -> ExitCode {
                             )
                         })?;
                     }
+
+                    // panic: for test
+                    if spec_tasks.iter().any(|str| str.as_str() == "panic") {
+                        panic!("test panic");
+                    }
+
                     Ok(())
                 });
 

@@ -32,4 +32,4 @@ services:
         max-file: '2'      
     volumes:
       - /srv/alpha-replay/:/replay
-      - ./params:/opt/params
+      - /home/scroll/go-prover-docker/volume/params:/opt/params
