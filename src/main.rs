@@ -33,14 +33,14 @@ use std::{backtrace, env, panic, process::ExitCode, str::FromStr};
 // Must set ENV `SCROLL_PROVER_ASSETS_DIR` for config files and
 // `SCROLL_PROVER_PARAMS_DIR` for param files.
 // `SCROLL_PROVER_OUTPUT_DIR` is optional, the chunk proofs are dumped if set.
-fn chunk_prove(batch_id: i64, chunk_id: i64, witness_block: &WitnessBlock) -> Result<()> {
+fn chunk_prove(chunk_id: i64, witness_block: &WitnessBlock) -> Result<()> {
     // TODO: replace to one global chunk-prover.
     let params_dir = read_env_var("SCROLL_PROVER_PARAMS_DIR", PARAMS_DIR.to_string());
     let assets_dir = read_env_var("SCROLL_PROVER_ASSETS_DIR", PARAMS_DIR.to_string());
     let mut prover = zkevm::Prover::from_dirs(&params_dir, &assets_dir);
 
     // Generate chunk-snark.
-    let name = format!("batch_{batch_id}_chunk_{chunk_id}");
+    let name = format!("chunk_{chunk_id}");
     let chunk_snark = prover
         .inner
         .load_or_gen_final_chunk_snark(&name, witness_block, None)?;
@@ -186,7 +186,7 @@ async fn main() -> ExitCode {
 
     log::info!("relay-alpha testnet runner: begin");
 
-    let (batch_id, chunks) = match get_chunks_info(&setting).await {
+    let (id, chunks) = match get_chunks_info(&setting).await {
         Ok(r) => r,
         Err(e) => {
             log::error!("run-testnet: failed to request API err {e:?}");
@@ -197,7 +197,7 @@ async fn main() -> ExitCode {
     let mut chunks_task_complete = true;
     match chunks {
         None => {
-            log::info!("run-testnet: finished to prove at batch-{batch_id}");
+            log::info!("run-testnet: finished to prove at {id}");
             return ExitCode::from(EXIT_NO_MORE_TASK);
         }
         Some(chunks) => {
@@ -288,22 +288,23 @@ async fn main() -> ExitCode {
                 let spec_tasks = setting.spec_tasks.clone();
 
                 let handling_ret = panic::catch_unwind(move || {
-                    let witness_block = build_block(&block_traces, batch_id, chunk_id)
+                    let witness_block = build_block(&block_traces, chunk_id)
                         .map_err(|e| anyhow::anyhow!("testnet: building block failed {e:?}"))?;
 
                     // mock
                     if spec_tasks.iter().any(|str| str.as_str() == "mock") {
                         Prover::<SuperCircuit>::mock_prove_witness_block(&witness_block)
                         .map_err(|e| {
-                            anyhow::anyhow!("testnet: failed to mock prove chunk {chunk_id} inside batch {batch_id}:\n{e:?}")
+                            anyhow::anyhow!("testnet: failed to mock prove chunk {chunk_id} inside {id}:\n{e:?}")
                         })?;
                     }
 
                     // prove
                     if spec_tasks.iter().any(|str| str.as_str() == "prove") {
-                        chunk_prove(batch_id, chunk_id, &witness_block)
-                        .map_err(|e| {
-                            anyhow::anyhow!("testnet: failed to prove chunk {chunk_id} inside batch {batch_id}:\n{e:?}")
+                        chunk_prove(chunk_id, &witness_block).map_err(|e| {
+                            anyhow::anyhow!(
+                                "testnet: failed to prove chunk {chunk_id} inside {id}:\n{e:?}"
+                            )
                         })?;
                     }
                     Ok(())
@@ -325,7 +326,7 @@ async fn main() -> ExitCode {
                     })
                     .and_then(|r| r)
                 {
-                    log::info!("encounter some error in batch {}", batch_id);
+                    log::info!("encounter some error in batch {id}");
                     if let Err(e) = mark_chunk_failure(&chunk_dir, &e.to_string()) {
                         log::error!("can not output error data for chunk {}: {:?}", chunk_id, e);
                         chunks_task_complete = false;
@@ -337,7 +338,7 @@ async fn main() -> ExitCode {
         }
     }
 
-    if let Err(e) = notify_chunks_complete(&setting, batch_id, chunks_task_complete).await {
+    if let Err(e) = notify_chunks_complete(&setting, *id.as_ref(), chunks_task_complete).await {
         log::error!("can not deliver complete notify to coordinator: {e:?}");
         return ExitCode::from(EXIT_FAILED_ENV_WITH_TASK);
     }
@@ -352,11 +353,7 @@ async fn main() -> ExitCode {
     }
 }
 
-fn build_block(
-    block_traces: &[BlockTrace],
-    batch_id: i64,
-    chunk_id: i64,
-) -> anyhow::Result<WitnessBlock> {
+fn build_block(block_traces: &[BlockTrace], chunk_id: i64) -> anyhow::Result<WitnessBlock> {
     let gas_total: u64 = block_traces
         .iter()
         .map(|b| b.header.gas_used.as_u64())
@@ -364,7 +361,7 @@ fn build_block(
     let witness_block = block_traces_to_witness_block(block_traces)?;
     let rows = calculate_row_usage_of_witness_block(&witness_block)?;
     log::info!(
-        "rows of batch {batch_id}(block range {:?} to {:?}):",
+        "rows of chunk {chunk_id}(block range {:?} to {:?}):",
         block_traces.first().and_then(|b| b.header.number),
         block_traces.last().and_then(|b| b.header.number),
     );
@@ -381,38 +378,91 @@ fn build_block(
     Ok(witness_block)
 }
 
+#[derive(Debug, Clone, Copy)]
+enum BatchOrChunkId {
+    Batch(i64),
+    Chunk(i64),
+}
+
+impl std::fmt::Display for BatchOrChunkId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Batch(i) => write!(f, "batch-{i}"),
+            Self::Chunk(i) => write!(f, "chunk-{i}"),
+        }
+    }
+}
+
+impl AsRef<i64> for BatchOrChunkId {
+    fn as_ref(&self) -> &i64 {
+        match self {
+            Self::Batch(i) => i,
+            Self::Chunk(i) => i,
+        }
+    }
+}
+
 /// Request chunk info from cordinator
-async fn get_chunks_info(setting: &Setting) -> Result<(i64, Option<Vec<ChunkInfo>>)> {
+async fn get_chunks_info(setting: &Setting) -> Result<(BatchOrChunkId, Option<Vec<ChunkInfo>>)> {
     let url = Url::parse(&setting.chunks_url)?;
 
     let resp: String = reqwest::get(url).await?.text().await?;
     log::debug!("resp is {resp}");
     let resp: RollupscanResponse = serde_json::from_str(&resp)?;
-    log::info!(
-        "handling batch {}, chunk size {}",
-        resp.batch_index,
-        resp.chunks.as_ref().unwrap().len()
-    );
-    Ok((resp.batch_index, resp.chunks))
+
+    // we compatible with both chunk/batch resp. For chunk resp,
+    // batch_index is set to 'null' in json
+    if let Some(batch_index) = resp.batch_index {
+        log::info!(
+            "handling batch {}, chunk size {}",
+            batch_index,
+            resp.chunks.as_ref().unwrap().len()
+        );
+        Ok((BatchOrChunkId::Batch(batch_index), resp.chunks))
+    } else if let Some(block_infos) = resp.blocks {
+        if block_infos.is_empty() {
+            Ok((BatchOrChunkId::Chunk(-1), None))
+        } else {
+            // Fold block infos
+            let total_tx_num = block_infos.iter().map(|blk| blk.tx_num).sum::<i64>();
+            let start_block_number = block_infos
+                .iter()
+                .map(|blk| blk.number)
+                .min()
+                .expect("should has one");
+            let end_block_number = block_infos
+                .iter()
+                .map(|blk| blk.number)
+                .max()
+                .expect("should has one");
+            let chunk_index = resp.chunk_index;
+            Ok((
+                BatchOrChunkId::Chunk(chunk_index),
+                Some(vec![ChunkInfo {
+                    index: chunk_index,
+                    total_tx_num,
+                    start_block_number,
+                    end_block_number,
+                    created_at: Default::default(),
+                    hash: Default::default(),
+                }]),
+            ))
+        }
+    } else {
+        Ok((BatchOrChunkId::Batch(-1), None))
+    }
 }
 
-async fn notify_chunks_complete(
-    setting: &Setting,
-    batch_index: i64,
-    completed: bool,
-) -> Result<()> {
+async fn notify_chunks_complete(setting: &Setting, index: i64, completed: bool) -> Result<()> {
     let url = Url::parse_with_params(
         &setting.task_url,
-        &[(
-            if completed { "done" } else { "drop" },
-            batch_index.to_string(),
-        )],
+        &[(if completed { "done" } else { "drop" }, index.to_string())],
     )?;
 
     let resp = reqwest::get(url).await?.text().await?;
     log::info!(
-        "notify batch {} {}, resp {}",
-        batch_index,
+        "notify index {} {}, resp {}",
+        index,
         if completed { "done" } else { "drop" },
         resp,
     );
@@ -421,8 +471,11 @@ async fn notify_chunks_complete(
 
 #[derive(Deserialize, Debug)]
 struct RollupscanResponse {
-    batch_index: i64,
+    batch_index: Option<i64>,
+    #[serde(default)]
+    chunk_index: i64,
     chunks: Option<Vec<ChunkInfo>>,
+    blocks: Option<Vec<BlockInfo>>,
 }
 
 #[derive(Deserialize, Debug)]
@@ -433,6 +486,14 @@ struct ChunkInfo {
     hash: String,
     start_block_number: i64,
     end_block_number: i64,
+}
+
+#[derive(Deserialize, Debug)]
+struct BlockInfo {
+    number: i64,
+    tx_num: i64,
+    hash: String,
+    block_timestamp: String,
 }
 
 #[derive(Debug, Default)]
@@ -500,7 +561,7 @@ mod test {
         let block_traces = load_block_traces_for_test().1;
         let witness_block = block_traces_to_witness_block(&block_traces).unwrap();
 
-        let result = chunk_prove(1, 1, &witness_block);
+        let result = chunk_prove(1, &witness_block);
         assert!(result.is_ok());
     }
 }
