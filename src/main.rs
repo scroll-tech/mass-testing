@@ -13,8 +13,9 @@ use prover::{
     common,
     config::LayerId,
     inner::Prover,
+    proof::dump_as_json,
     test_util::PARAMS_DIR,
-    types::eth::BlockTrace,
+    types::eth::{BlockTrace, StorageTrace},
     utils::{read_env_var, short_git_version, GIT_VERSION},
     zkevm::{
         self,
@@ -23,13 +24,15 @@ use prover::{
             WitnessBlock,
         },
     },
+    ChunkHash, ChunkProof,
 };
 use reqwest::Url;
 use serde::Deserialize;
 use std::{backtrace, env, panic, process::ExitCode, str::FromStr};
 
-// Must set ENV SCROLL_PROVER_ASSETS_DIR for config files and
-// SCROLL_PROVER_PARAMS_DIR for param files.
+// Must set ENV `SCROLL_PROVER_ASSETS_DIR` for config files and
+// `SCROLL_PROVER_PARAMS_DIR` for param files.
+// `SCROLL_PROVER_OUTPUT_DIR` is optional, the chunk proofs are dumped if set.
 fn chunk_prove(batch_id: i64, chunk_id: i64, witness_block: &WitnessBlock) -> Result<()> {
     // TODO: replace to one global chunk-prover.
     let params_dir = read_env_var("SCROLL_PROVER_PARAMS_DIR", PARAMS_DIR.to_string());
@@ -40,16 +43,32 @@ fn chunk_prove(batch_id: i64, chunk_id: i64, witness_block: &WitnessBlock) -> Re
     let name = format!("batch_{batch_id}_chunk_{chunk_id}");
     let chunk_snark = prover
         .inner
-        .load_or_gen_final_chunk_snark(&name, &witness_block, None)?;
+        .load_or_gen_final_chunk_snark(&name, witness_block, None)?;
     log::info!("{name}: generated chunk-snark");
 
     // Verify chunk-snark.
     env::set_var("COMPRESSION_CONFIG", LayerId::Layer2.config_path());
-    let pk = prover.inner.pk(LayerId::Layer2.id()).unwrap();
-    let vk = pk.get_vk().clone();
     let params = prover.inner.params(LayerId::Layer2.degree()).clone();
+    let pk = prover
+        .inner
+        .pk(LayerId::Layer2.id())
+        .ok_or_else(|| anyhow!("{name}: miss layer-2 pk"))?;
+    let vk = pk.get_vk().clone();
     let verifier = common::Verifier::<CompressionCircuit>::new(params, vk);
     log::info!("{name}: Constructed common verifier");
+
+    if let Ok(output_dir) = env::var("SCROLL_PROVER_OUTPUT_DIR") {
+        let chunk_hash = ChunkHash::from_witness_block(witness_block, false);
+        let chunk_proof = ChunkProof::new(
+            chunk_snark.clone(),
+            StorageTrace::default(),
+            Some(pk),
+            Some(chunk_hash),
+        )?;
+
+        // The generated filename is as `full_proof_batch_1_chunk_1.json`.
+        dump_as_json(&output_dir, &name, &chunk_proof)?;
+    }
 
     let verified = verifier.verify_snark(chunk_snark);
     if !verified {
@@ -111,7 +130,7 @@ fn prepare_chunk_dir(output_dir: &str, chunk_id: u64) -> Result<String> {
     })?;
     Ok(chunk_path
         .to_str()
-        .ok_or_else(|| anyhow::anyhow!("invalid chunk path"))?
+        .ok_or_else(|| anyhow!("invalid chunk path"))?
         .into())
 }
 
