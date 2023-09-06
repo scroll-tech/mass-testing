@@ -423,6 +423,8 @@ async fn get_chunks_info(setting: &Setting) -> Result<(BatchOrChunkId, Option<Ve
         if block_infos.is_empty() {
             Ok((BatchOrChunkId::Chunk(-1), None))
         } else {
+            let chunk_index = resp.chunk_index;
+            log::info!("handling single chunk {chunk_index}",);
             // Fold block infos
             let total_tx_num = block_infos.iter().map(|blk| blk.tx_num).sum::<i64>();
             let start_block_number = block_infos
@@ -435,7 +437,6 @@ async fn get_chunks_info(setting: &Setting) -> Result<(BatchOrChunkId, Option<Ve
                 .map(|blk| blk.number)
                 .max()
                 .expect("should has one");
-            let chunk_index = resp.chunk_index;
             Ok((
                 BatchOrChunkId::Chunk(chunk_index),
                 Some(vec![ChunkInfo {
