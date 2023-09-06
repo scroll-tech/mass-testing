@@ -1,4 +1,4 @@
-FROM scrolltech/mass-test
+FROM scrolltech/masstest-runner
 
 ADD run.sh /opt/testnet-runner.sh
 ADD wrap_group.sh /opt/
