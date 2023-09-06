@@ -481,7 +481,7 @@ mod test {
         let block_traces = load_block_traces_for_test().1;
         let witness_block = block_traces_to_witness_block(&block_traces).unwrap();
 
-        let result = chunk_prove(&witness_block);
+        let result = chunk_prove(1, 1, &witness_block);
         assert!(result.is_ok());
     }
 }
