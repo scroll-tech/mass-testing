@@ -78,12 +78,12 @@ function check_output {
       chunk_name=`echo "$chunk_dir" | grep -oE '[^/]+$'`
       echo "${chunk_name} fail (${chunk_dir})"
       curl -s "${COORDINATOR_API_URL}nodewarning?chunk_issue=${chunk_name}"
-      cp -r ${chunk_dir} ${issue_dir}
+      cp -rf ${chunk_dir} ${issue_dir}
       rm -f ${fail_file}
     fi
   done
   if [ -n "${output_export_dir:-}" ]; then
-    mv ${output_dir}/* ${output_export_dir}
+    mv -f ${output_dir}/* ${output_export_dir}
   fi
   set +e
 }
