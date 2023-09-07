@@ -83,7 +83,8 @@ function check_output {
     fi
   done
   if [ -n "${output_export_dir:-}" ]; then
-    mv -f ${output_dir}/* ${output_export_dir}
+    cp -rf ${output_dir}/* ${output_export_dir}
+    rm -rf ${output_dir}/*
   fi
   set +e
 }
