@@ -84,7 +84,7 @@ function check_output {
   done
   if [ -n "${output_export_dir:-}" ]; then
     cp -rf ${output_dir}/* ${output_export_dir}
-    rm -rf ${output_dir}/*
+    rm -rf ${output_dir}/* 
   fi
   set +e
 }
@@ -108,6 +108,10 @@ while true; do
   elif [ $exit_code -eq 9 ]; then
     # there maybe more batchs, wait 10 min
     sleep 600
+    exit_code=$?
+  elif [ $exit_code -eq 11 ]; then
+    # for temporary network issue, wait only 15s and retry
+    sleep 15
     exit_code=$?
   fi
 

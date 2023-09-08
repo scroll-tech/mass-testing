@@ -168,6 +168,7 @@ fn mark_chunk_failure(chunk_dir: &str, data: &str) -> Result<()> {
 }
 
 const EXIT_NO_MORE_TASK: u8 = 9;
+const EXIT_TEMP_NETWORK_ISSUE: u8 = 11;
 const EXIT_FAILED_ENV: u8 = 13;
 const EXIT_FAILED_ENV_WITH_TASK: u8 = 17;
 
@@ -195,6 +196,7 @@ async fn main() -> ExitCode {
     };
 
     let mut chunks_task_complete = true;
+    let mut expected_failed_exit_code = EXIT_FAILED_ENV;
     match chunks {
         None => {
             log::info!("run-testnet: finished to prove at {id}");
@@ -231,6 +233,7 @@ async fn main() -> ExitCode {
                 if block_traces.len()
                     < (chunk.end_block_number - chunk.start_block_number + 1) as usize
                 {
+                    expected_failed_exit_code = EXIT_TEMP_NETWORK_ISSUE;
                     chunks_task_complete = false;
                     break;
                 }
@@ -355,7 +358,7 @@ async fn main() -> ExitCode {
         log::info!("relay-alpha testnet runner: complete");
         ExitCode::from(0)
     } else {
-        ExitCode::from(EXIT_FAILED_ENV)
+        ExitCode::from(expected_failed_exit_code)
     }
 }
 
