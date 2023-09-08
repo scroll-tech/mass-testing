@@ -4,7 +4,7 @@ services:
     build:
       context: ./
       args:
-        RUNNER_IMAGE: masstest-runner-gpu      
+        RUNNER_IMAGE: johnsonjie/masstest-runner-gpu:v0.8.1
       dockerfile: Dockerfile.deploy
     runtime: nvidia
     container_name: mass-testing-runner-gpu
