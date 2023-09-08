@@ -2,6 +2,7 @@ version: '3'
 services:
   test-runner:
     build:
+      pull: true
       context: ./
       dockerfile: Dockerfile.deploy
     container_name: mass-testing-runner
