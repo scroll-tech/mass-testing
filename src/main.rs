@@ -336,7 +336,15 @@ async fn main() -> ExitCode {
                     .and_then(|r| r)
                 {
                     log::info!("encounter some error in batch {id}");
-                    if let Err(e) = mark_chunk_failure(&chunk_dir, &e.to_string()) {
+                    let err_content = e.to_string();
+                    // some special handling to avoid false positive
+                    if err_content.contains("no gpu device") {
+                        log::error!("the error is a false positive result caused by hardware failure, stop this node on {}: {:?}", chunk_id, e);
+                        chunks_task_complete = false;
+                        break;
+                    }
+
+                    if let Err(e) = mark_chunk_failure(&chunk_dir, &err_content) {
                         log::error!("can not output error data for chunk {}: {:?}", chunk_id, e);
                         chunks_task_complete = false;
                         break;
