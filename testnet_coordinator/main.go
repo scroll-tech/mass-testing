@@ -155,6 +155,7 @@ func taskHandler(assigner *TaskAssigner) http.HandlerFunc {
 
 		done_index := r.URL.Query().Get("done")
 		drop_index := r.URL.Query().Get("drop")
+		reset_index := r.URL.Query().Get("reset")
 
 		if done_index != "" {
 			log.Println("receive done notify for batch:", done_index)
@@ -175,6 +176,15 @@ func taskHandler(assigner *TaskAssigner) http.HandlerFunc {
 			}
 			assigner.drop(ind)
 			assigner.coordinatorNotify(fmt.Sprintf("Batch %d is once dropped", ind), COORDINATOR_BADNEWS)
+		} else if reset_index != "" {
+			log.Println("receive reset notify for batch:", reset_index)
+			var ind uint64
+			if _, err := fmt.Sscanf(reset_index, "%d", &ind); err != nil {
+				http.Error(w, "invalid reset index, need integer", http.StatusBadRequest)
+				return
+			}
+			assigner.reset(ind)
+			assigner.coordinatorNotify(fmt.Sprintf("Batch %d is reset", ind), COORDINATOR_COMMON)
 		} else {
 			http.Error(w, "must query with drop or done", http.StatusBadRequest)
 			return

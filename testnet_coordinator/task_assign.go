@@ -280,12 +280,11 @@ func (t *TaskAssigner) complete(id uint64) (bool, uint64) {
 	valid, seq := t.tasks.revCheck(id)
 	if !valid {
 		log.Printf("invalid id %d\n", id)
-	}
-
-	if _, existed := t.runingTasks[seq]; !existed {
-		log.Printf("unexpected completed task (%d)\n", id)
+	} else if seq < t.progress {
+		log.Printf("completed task (%d) out of range {now %d, seq %d}\n", t.progress, seq)
 		return false, t.progress
 	}
+
 	t.runingTasks[seq] = TaskCompleted
 
 	// scan all tasks and make progress
