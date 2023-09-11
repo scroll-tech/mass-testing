@@ -9,9 +9,10 @@ if [ -z "${index:-}" ]; then
   exit 1
 fi
 
-GROUP_INDEX=$((index % 50))
+#GROUP_INDEX=$((index % 50))
+#GP_SUFFIX=$((GROUP_INDEX / 5))
 
-GP_SUFFIX=$((GROUP_INDEX / 5))
+GP_SUFFIX=$((index % 10))
 
 COORDINATOR_API_URL_VAL=COORDINATOR_API_URL_${GP_SUFFIX}
 L2GETH_API_URL_VAL=L2GETH_API_URL_${GP_SUFFIX}
