@@ -206,26 +206,24 @@ func (t *TaskAssigner) assign_new() (bool, uint64) {
 	}
 
 	target := t.progress
-	for targetI, status := range t.runingTasks {
-		if status == TaskReAssign {
-			t.runingTasks[targetI] = TaskAssigned
-			_, tid := t.tasks.pick(targetI)
-			return true, tid
-		} else if targetI >= target {
-			target = targetI + 1
-		}
-	}
-
-	upProgress := target == t.progress
-	if t.sampler != nil {
-		for !t.sampler.sampleInt(int64(target)) {
-			if upProgress {
-				t.progress++
+	// select the empty slot or droped task
+	for {
+		if status, existed := t.runingTasks[target]; !existed {
+			// if still sampling ...
+			if t.sampler != nil {
+				if !t.sampler.sampleInt(int64(target)) {
+					t.runingTasks[target] = TaskCompleted
+				} else {
+					break
+				}
 			} else {
-				t.runingTasks[target] = TaskCompleted
+				break
 			}
-			target++
+		} else if status == TaskReAssign {
+			t.runingTasks[target] = TaskAssigned
+			break
 		}
+		target++
 	}
 
 	valid, tid := t.tasks.pick(target)
@@ -281,7 +279,7 @@ func (t *TaskAssigner) complete(id uint64) (bool, uint64) {
 	if !valid {
 		log.Printf("invalid id %d\n", id)
 	} else if seq < t.progress {
-		log.Printf("completed task (%d) out of range {now %d, seq %d}\n", t.progress, seq)
+		log.Printf("completed task (%d) out of range {now %d, seq %d}\n", id, t.progress, seq)
 		return false, t.progress
 	}
 
