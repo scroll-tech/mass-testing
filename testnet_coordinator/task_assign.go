@@ -205,10 +205,19 @@ func (t *TaskAssigner) assign_new() (bool, uint64) {
 		return false, 0
 	}
 
+	// first try to assign dropped task, a slot set
+	// by 'reset' can be only assigned from here
+	for target, status := range t.runingTasks {
+		if status == TaskReAssign {
+			t.runingTasks[target] = TaskAssigned
+			return t.tasks.pick(target)
+		}
+	}
+
 	target := t.progress
-	// select the empty slot or droped task
+	// select the empty slot
 	for {
-		if status, existed := t.runingTasks[target]; !existed {
+		if _, existed := t.runingTasks[target]; !existed {
 			// if still sampling ...
 			if t.sampler != nil {
 				if !t.sampler.sampleInt(int64(target)) {
@@ -219,9 +228,6 @@ func (t *TaskAssigner) assign_new() (bool, uint64) {
 			} else {
 				break
 			}
-		} else if status == TaskReAssign {
-			t.runingTasks[target] = TaskAssigned
-			break
 		}
 		target++
 	}
@@ -280,6 +286,8 @@ func (t *TaskAssigner) complete(id uint64) (bool, uint64) {
 		log.Printf("invalid id %d\n", id)
 	} else if seq < t.progress {
 		log.Printf("completed task (%d) out of range {now %d, seq %d}\n", id, t.progress, seq)
+		// it maybe a task added by 'reset', just delete the corresponding task (if any)
+		delete(t.runingTasks, seq)
 		return false, t.progress
 	}
 
