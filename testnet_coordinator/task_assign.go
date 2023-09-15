@@ -271,6 +271,7 @@ func (t *TaskAssigner) reset(id uint64) {
 	valid, seq := t.tasks.revCheck(id)
 	if !valid {
 		log.Printf("invalid id %d\n", id)
+		return
 	}
 
 	t.runingTasks[seq] = TaskReAssign
