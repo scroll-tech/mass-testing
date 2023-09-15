@@ -13,6 +13,7 @@ services:
      - ISSUE_DIR=/replay/issues
      - TESTNET_TASKS=mock
      - RUST_BACKTRACE=1
+     - CHAIN_ID=534353
     command: ./wrap_group.sh
     # restart: on-failure
     # ports:

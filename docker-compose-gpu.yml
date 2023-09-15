@@ -18,7 +18,7 @@ services:
       - SCROLL_PROVER_ASSETS_DIR=/opt/assets
       - SCROLL_PROVER_PARAMS_DIR=/opt/params
       - RUST_MIN_STACK=100000000
-      - CHAIN_ID=534351
+      - CHAIN_ID=534353
 #      - RUST_LOG=trace
       - RUST_BACKTRACE=1
     command: ./wrap_group.sh
