@@ -9,6 +9,11 @@ if [ -z "${COORDINATOR_API_URL:-}" ]; then
   exit 1
 fi
 
+curl_agent="x-test-runner"
+if [ -n "${index:-}" ]; then
+  curl_agent="${curl_agent}_${index}"
+fi
+
 function exit_trap {
   reason="unknown_error"
   if [ $1 -eq 17 ]; then
@@ -26,12 +31,12 @@ function exit_trap {
   if [ -z "${SCRIPT_ERROR:-}" ]; then
     reason="${reason}, script error"
   fi
-  curl -s ${COORDINATOR_API_URL}nodewarning?panic=${reason}
+  curl -H "User-Agent: ${curl_agent}" -s "${COORDINATOR_API_URL}nodewarning?panic=${reason}"
 }
 
 trap "SCRIPT_ERROR=1" ERR
 trap 'exit_trap $?' EXIT
-trap "curl -s ${COORDINATOR_API_URL}nodewarning?panic=user_interrupt" SIGINT
+trap "curl -H \"User-Agent: ${curl_agent}\" -s ${COORDINATOR_API_URL}nodewarning?panic=user_interrupt" SIGINT
 
 if [ -z "${TESTNET_TASKS:-}" ]; then
   echo "should specify at least one tasks from mock, prove and agg, or combine them with commas"
@@ -77,7 +82,7 @@ function check_output {
       #TODO copy $chunk_dir
       chunk_name=`echo "$chunk_dir" | grep -oE '[^/]+$'`
       echo "${chunk_name} fail (${chunk_dir})"
-      curl -s "${COORDINATOR_API_URL}nodewarning?chunk_issue=${chunk_name}"
+      curl -H "User-Agent: ${curl_agent}" -s "${COORDINATOR_API_URL}nodewarning?chunk_issue=${chunk_name}"
       cp -rf ${chunk_dir} ${issue_dir}
       rm -f ${fail_file}
     fi

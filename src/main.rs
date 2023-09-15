@@ -24,7 +24,7 @@ use prover::{
     },
     BlockTrace, ChunkHash, ChunkProof, StorageTrace,
 };
-use reqwest::Url;
+use reqwest::{ClientBuilder, Url};
 use serde::Deserialize;
 use std::{backtrace, env, panic, process::ExitCode, str::FromStr};
 
@@ -177,8 +177,15 @@ async fn main() -> ExitCode {
 
     let setting = Setting::new();
 
-    let provider = Provider::<Http>::try_from(&setting.l2geth_api_url)
-        .expect("run-testnet: failed to initialize ethers Provider");
+    let cli = ClientBuilder::new()
+        .timeout(std::time::Duration::from_secs(600))
+        .build()
+        .expect("run-testnet: failed to initialize ethers Provider from system configuration");
+    let provider = Provider::new(Http::new_with_client(
+        Url::from_str(&setting.l2geth_api_url)
+            .expect("run-testnet: url failed to initialize ethers Provider"),
+        cli,
+    ));
 
     log::info!("git version {}", GIT_VERSION);
     log::info!("short git version {}", short_git_version());

@@ -6,6 +6,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"strings"
 )
 
 type UpstreamError int
@@ -199,6 +200,10 @@ func nodeProxyHandler(assigner *TaskAssigner) http.HandlerFunc {
 
 		chunk_issue_index := r.URL.Query().Get("chunk_issue")
 		node_panic_reason := r.URL.Query().Get("panic")
+		node_id := r.RemoteAddr
+		if pos := strings.Index(r.UserAgent(), "x-test-runner"); pos != -1 {
+			node_id = r.UserAgent()[pos+len("x-test-runner_"):] + "@" + node_id
+		}
 
 		if chunk_issue_index != "" {
 			var ind uint64
@@ -206,9 +211,9 @@ func nodeProxyHandler(assigner *TaskAssigner) http.HandlerFunc {
 				http.Error(w, "invalid index, need integer", http.StatusBadRequest)
 				return
 			}
-			assigner.nodeProxyNotify(r.RemoteAddr, fmt.Sprintf("Prover has issue in chunk %d, check it", ind))
+			assigner.nodeProxyNotify(node_id, fmt.Sprintf("[%s]: Prover has issue in chunk %d, check it", node_id, ind))
 		} else if node_panic_reason != "" {
-			assigner.nodeProxyNotify(r.RemoteAddr, fmt.Sprintf("Node status bad because <%s>, check it", node_panic_reason))
+			assigner.nodeProxyNotify(node_id, fmt.Sprintf("[%s]: Node status bad because %s, check it", node_id, node_panic_reason))
 		} else {
 			http.Error(w, "must query with panic or chunk_issue", http.StatusBadRequest)
 			return
