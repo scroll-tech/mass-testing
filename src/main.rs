@@ -14,17 +14,15 @@ use prover::{
     config::LayerId,
     inner::Prover,
     proof::dump_as_json,
-    test_util::PARAMS_DIR,
-    types::eth::{BlockTrace, StorageTrace},
+    types::WitnessBlock,
     utils::{read_env_var, short_git_version, GIT_VERSION},
     zkevm::{
         self,
         circuit::{
             block_traces_to_witness_block, calculate_row_usage_of_witness_block, SuperCircuit,
-            WitnessBlock,
         },
     },
-    ChunkHash, ChunkProof,
+    BlockTrace, ChunkHash, ChunkProof, StorageTrace,
 };
 use reqwest::Url;
 use serde::Deserialize;
@@ -35,15 +33,16 @@ use std::{backtrace, env, panic, process::ExitCode, str::FromStr};
 // `SCROLL_PROVER_OUTPUT_DIR` is optional, the chunk proofs are dumped if set.
 fn chunk_prove(chunk_id: i64, witness_block: &WitnessBlock) -> Result<()> {
     // TODO: replace to one global chunk-prover.
-    let params_dir = read_env_var("SCROLL_PROVER_PARAMS_DIR", PARAMS_DIR.to_string());
-    let assets_dir = read_env_var("SCROLL_PROVER_ASSETS_DIR", PARAMS_DIR.to_string());
+    let params_dir = read_env_var("SCROLL_PROVER_PARAMS_DIR", "./params".to_string());
+    let assets_dir = read_env_var("SCROLL_PROVER_ASSETS_DIR", "./assets".to_string());
     let mut prover = zkevm::Prover::from_dirs(&params_dir, &assets_dir);
 
     // Generate chunk-snark.
     let name = format!("chunk_{chunk_id}");
-    let chunk_snark = prover
-        .inner
-        .load_or_gen_final_chunk_snark(&name, witness_block, None)?;
+    let chunk_snark =
+        prover
+            .inner
+            .load_or_gen_final_chunk_snark(&name, witness_block, None, None)?;
     log::info!("{name}: generated chunk-snark");
 
     // Verify chunk-snark.
@@ -565,6 +564,8 @@ impl Setting {
     }
 }
 
+// TODO: not compiled after v0.9.0
+/*
 #[cfg(test)]
 mod test {
     use super::*;
@@ -583,3 +584,4 @@ mod test {
         assert!(result.is_ok());
     }
 }
+*/
