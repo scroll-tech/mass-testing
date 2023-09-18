@@ -19,8 +19,8 @@ serde_json = "1.0.66"
 tar = "0.4"
 flate2 = "1"
 tokio = { version = "1", features = ["full"] }
-prover = { git = "https://github.com/scroll-tech/zkevm-circuits.git", tag = "v0.9.0", features = ["parallel_syn", "scroll", "shanghai"] }
-aggregator = { git = "https://github.com/scroll-tech/zkevm-circuits.git", tag = "v0.9.0" }
+prover = { git = "https://github.com/scroll-tech/zkevm-circuits.git", tag = "v0.9.1", features = ["parallel_syn", "scroll", "shanghai"] }
+aggregator = { git = "https://github.com/scroll-tech/zkevm-circuits.git", tag = "v0.9.1" }
 
 
 [patch.crates-io]
