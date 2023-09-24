@@ -264,6 +264,8 @@ async fn main() -> ExitCode {
 
                     // prove
                     if spec_tasks.iter().any(|str| str.as_str() == "prove") {
+                        // Set ENV SCROLL_PROVER_ASSETS_DIR for asset files and
+                        // SCROLL_PROVER_PARAMS_DIR for param files.
                         let proof =
                             prover::test::chunk_prove(&format!("chunk_{chunk_id}"), &witness_block);
 
@@ -631,4 +633,26 @@ fn batch_prove(
     log::info!("batch {} has been handled", batch_id);
 
     true
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use prover::{test::chunk_prove, utils::get_block_trace_from_file};
+
+    // Long running prove on GPU
+    #[ignore]
+    #[test]
+    fn test_chunk_and_batch_proving() {
+        let output_dir = read_env_var("OUTPUT_DIR", "output".to_string());
+        let trace_path = read_env_var("TRACE_PATH", "trace.json".to_string());
+
+        let log_handle = log4rs::init_config(common_log().unwrap()).unwrap();
+
+        let block_trace = get_block_trace_from_file(trace_path);
+        let witness_block = block_traces_to_witness_block(&[block_trace]).unwrap();
+
+        let chunk_proof = chunk_prove("chunk_1", &witness_block);
+        assert!(batch_prove(1, &output_dir, &log_handle, vec![chunk_proof]));
+    }
 }
