@@ -267,7 +267,7 @@ async fn main() -> ExitCode {
                         let proof =
                             prover::test::chunk_prove(&format!("chunk_{chunk_id}"), &witness_block);
 
-                        // Save chunk-proof only for batch.
+                        // Save chunk-proof only for further batch-proving.
                         if batch_id.is_some() {
                             chunk_proof = Some(proof);
                         }

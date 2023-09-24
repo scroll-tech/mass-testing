@@ -3839,7 +3839,6 @@ dependencies = [
 name = "testnet-runner"
 version = "0.6.4"
 dependencies = [
- "aggregator",
  "anyhow",
  "dotenv",
  "ethers-providers",
