@@ -202,7 +202,9 @@ func nodeProxyHandler(assigner *TaskAssigner) http.HandlerFunc {
 		node_panic_reason := r.URL.Query().Get("panic")
 		node_id := r.RemoteAddr
 		if pos := strings.Index(r.UserAgent(), "x-test-runner"); pos != -1 {
-			node_id = r.UserAgent()[pos+len("x-test-runner_"):] + "@" + node_id
+			if len(r.UserAgent()) >= pos+len("x-test-runner_") {
+				node_id = r.UserAgent()[pos+len("x-test-runner_"):] + "@" + node_id
+			}
 		}
 
 		if chunk_issue_index != "" {
