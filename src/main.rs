@@ -1,5 +1,5 @@
 #![allow(dead_code)]
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, bail, Result};
 use ethers_providers::{Http, Provider};
 use log4rs::{
     append::{
@@ -114,6 +114,65 @@ const EXIT_TEMP_NETWORK_ISSUE: u8 = 11;
 const EXIT_FAILED_ENV: u8 = 13;
 const EXIT_FAILED_ENV_WITH_TASK: u8 = 17;
 
+fn task_core<R: Default + Sized>(
+    output_dir: &str,
+    log_handle: &log4rs::Handle,
+    runner: impl FnOnce() -> Result<R> + panic::UnwindSafe,
+) -> Result<R> {
+    use std::sync::{Arc, RwLock};
+    let panic_message = Arc::new(RwLock::new(String::from(
+        "unknown error, message not recorded",
+    )));
+
+    // prepare for running test phase
+    let out_err = panic_message.clone();
+    panic::set_hook(Box::new(move |panic_info| {
+        let err_msg = format!(
+            "{} \nbacktrace: {}",
+            panic_info,
+            backtrace::Backtrace::capture(),
+        );
+
+        log::error!("{}", err_msg);
+        match out_err.write() {
+            Ok(mut error_str) => {
+                *error_str = err_msg;
+            }
+            Err(e) => {
+                log::error!("fail to write error message: {:?}", e);
+            }
+        }
+    }));
+
+    let handling_ret = panic::catch_unwind(runner);
+
+    let _ = panic::take_hook();
+    // this can not be handled gracefully
+    log_handle.set_config(common_log().unwrap());
+
+    handling_ret
+        .map_err(|_| {
+            // panic and we catch it in `panic_message`
+            let err_msg = panic_message
+                .read()
+                .map(|reader| reader.clone())
+                .unwrap_or(String::from("can not access panic_message"));
+            anyhow!("testnet panic: {}", err_msg)
+        })
+        .and_then(|r| r)
+        .or_else(|e| {
+            log::info!("written encountered chunk error in {output_dir}");
+            let err_content = e.to_string();
+            if err_content.contains("no gpu device") {
+                bail!("the error is a false positive result caused by hardware failure");
+            } else if let Err(e) = make_failure(output_dir, &err_content) {
+                log::error!("backup handling err: \n{err_content}");
+                bail!("can not output error data into {output_dir}: {e:?}");
+            }
+            Ok(Default::default())
+        })
+}
+
 #[tokio::main]
 async fn main() -> ExitCode {
     let log_handle = log4rs::init_config(common_log().unwrap()).unwrap();
@@ -153,14 +212,13 @@ async fn main() -> ExitCode {
 
     let mut chunks_task_complete = true;
     let mut expected_failed_exit_code = EXIT_FAILED_ENV;
+    let mut chunk_proofs = vec![];
     match chunks {
         None => {
             log::info!("run-testnet: finished to prove at {id}");
             return ExitCode::from(EXIT_NO_MORE_TASK);
         }
         Some(chunks) => {
-            let mut chunk_proofs = vec![];
-
             // TODO: restart from last chunk?
             for chunk in chunks {
                 let chunk_id = chunk.index;
@@ -208,7 +266,6 @@ async fn main() -> ExitCode {
                             log_handle.set_config(debug_log(&chunk_dir)?);
                             Ok(chunk_dir)
                         });
-                // u64).unwrap();
                 if let Err(e) = chunk_dir {
                     log::error!(
                         "can not prepare output enviroment for chunk {}: {:?}",
@@ -219,37 +276,9 @@ async fn main() -> ExitCode {
                     break;
                 }
                 let chunk_dir = chunk_dir.expect("ok ensured");
-
-                let panic_message = std::sync::Arc::new(std::sync::RwLock::new(String::from(
-                    "unknown error, message not recorded",
-                )));
-
-                // prepare for running test phase
-                let out_err = panic_message.clone();
-                panic::set_hook(Box::new(move |panic_info| {
-                    let err_msg = format!(
-                        "{} \nbacktrace: {}",
-                        panic_info,
-                        backtrace::Backtrace::capture(),
-                    );
-
-                    match out_err.write() {
-                        Ok(mut error_str) => {
-                            *error_str = err_msg;
-                        }
-                        Err(e) => {
-                            log::error!(
-                                "fail to write error message: {:?}\n backup testnet panic {}",
-                                e,
-                                err_msg
-                            );
-                        }
-                    }
-                }));
-
                 let spec_tasks = setting.spec_tasks.clone();
 
-                let handling_ret = panic::catch_unwind(move || {
+                let handling_ret = task_core(&chunk_dir, &log_handle, move || {
                     let witness_block = build_block(&block_traces, chunk_id)
                         .map_err(|e| anyhow::anyhow!("testnet: building block failed {e:?}"))?;
 
@@ -257,9 +286,9 @@ async fn main() -> ExitCode {
                     let mut chunk_proof = None;
                     if spec_tasks.iter().any(|str| str.as_str() == "mock") {
                         Prover::<SuperCircuit>::mock_prove_witness_block(&witness_block)
-                        .map_err(|e| {
-                            anyhow::anyhow!("testnet: failed to mock prove chunk {chunk_id} inside {id}:\n{e:?}")
-                        })?;
+                            .map_err(|e| {
+                                anyhow::anyhow!("testnet: failed to mock prove chunk {chunk_id} inside {id}:\n{e:?}")
+                            })?;
                     }
 
                     // prove
@@ -283,60 +312,54 @@ async fn main() -> ExitCode {
                     Ok(chunk_proof)
                 });
 
-                let _ = panic::take_hook();
-
-                // this can not be handled gracefully
-                log_handle.set_config(common_log().unwrap());
-
-                match handling_ret
-                    .map_err(|_| {
-                        // panic and we catch it in `panic_message`
-                        let err_msg = panic_message
-                            .read()
-                            .map(|reader| reader.clone())
-                            .unwrap_or(String::from("can not access panic_message"));
-                        anyhow!("testnet panic: {}", err_msg)
-                    })
-                    .and_then(|r| r)
-                {
+                match handling_ret {
                     Ok(chunk_proof) => {
-                        if let Some(proof) = chunk_proof {
-                            chunk_proofs.push(proof);
-                        }
+                        chunk_proofs.push(chunk_proof);
                     }
                     Err(e) => {
-                        log::info!("encounter some error in batch {id}");
-                        let err_content = e.to_string();
-                        // some special handling to avoid false positive
-                        if err_content.contains("no gpu device") {
-                            log::error!("the error is a false positive result caused by hardware failure, stop this node on {}: {:?}", chunk_id, e);
-                            chunks_task_complete = false;
-                            break;
-                        }
-
-                        if let Err(e) = make_failure(&chunk_dir, &err_content) {
-                            log::error!(
-                                "can not output error data for chunk {}: {:?}",
-                                chunk_id,
-                                e
-                            );
-                            chunks_task_complete = false;
-                            break;
-                        }
+                        log::info!("stop this node since error: {e}");
+                        chunks_task_complete = false;
+                        break;
                     }
                 }
                 log::info!("chunk {} has been handled", chunk_id);
             }
+        }
+    }
 
-            // Only do batch-proving for a batch.
-            if let Some(batch_id) = batch_id {
-                chunks_task_complete = batch_prove(
-                    batch_id,
-                    &setting.data_output_dir,
-                    &log_handle,
-                    chunk_proofs,
-                );
-            }
+    // batch prove
+    if setting.spec_tasks.iter().any(|str| str.as_str() == "agg") && chunks_task_complete {
+        if let Some(batch_id) = batch_id {
+            chunks_task_complete =
+                prepare_output_dir(&setting.data_output_dir, &format!("batch_{batch_id}"))
+                    .and_then(|dir| {
+                        log::info!("batch {} has been recorded to {}", batch_id, dir);
+                        log_handle.set_config(debug_log(&dir)?);
+                        task_core(&dir, &log_handle, move || {
+                            // check prove vector
+                            if chunk_proofs.iter().any(Option::is_none) {
+                                bail!("some chunk proof is not success, fail aggregation");
+                            }
+
+                            let chunk_hashes_proofs = chunk_proofs
+                                .into_iter()
+                                .map(Option::unwrap)
+                                .map(|proof| (proof.chunk_hash.unwrap(), proof))
+                                .collect();
+
+                            // note: would panic if any error raised
+                            prover::test::batch_prove(&format!("{id}"), chunk_hashes_proofs);
+                            Ok(())
+                        })
+                    })
+                    .map_err(|e| {
+                        log::error!("stop node since failure in aggregation: {}", e);
+                        e
+                    })
+                    .is_ok();
+        } else {
+            log::error!("specify aggregation in chunk proving, check wrong config");
+            chunks_task_complete = false;
         }
     }
 
@@ -344,8 +367,6 @@ async fn main() -> ExitCode {
         log::error!("can not deliver complete notify to coordinator: {e:?}");
         return ExitCode::from(EXIT_FAILED_ENV_WITH_TASK);
     }
-
-    //TODO: batch level ops
 
     if chunks_task_complete {
         log::info!("relay-alpha testnet runner: complete");
