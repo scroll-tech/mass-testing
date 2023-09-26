@@ -1,6 +1,5 @@
 #![allow(dead_code)]
-use aggregator::CompressionCircuit;
-use anyhow::{anyhow, bail, Result};
+use anyhow::{anyhow, Result};
 use ethers_providers::{Http, Provider};
 use log4rs::{
     append::{
@@ -10,73 +9,17 @@ use log4rs::{
     config::{Appender, Config, Logger, Root},
 };
 use prover::{
-    common,
-    config::LayerId,
     inner::Prover,
-    proof::dump_as_json,
     types::WitnessBlock,
     utils::{read_env_var, short_git_version, GIT_VERSION},
-    zkevm::{
-        self,
-        circuit::{
-            block_traces_to_witness_block, calculate_row_usage_of_witness_block, SuperCircuit,
-        },
+    zkevm::circuit::{
+        block_traces_to_witness_block, calculate_row_usage_of_witness_block, SuperCircuit,
     },
-    BlockTrace, ChunkHash, ChunkProof, StorageTrace,
+    BlockTrace, ChunkProof,
 };
 use reqwest::{ClientBuilder, Url};
 use serde::Deserialize;
 use std::{backtrace, env, panic, process::ExitCode, str::FromStr};
-
-// Must set ENV `SCROLL_PROVER_ASSETS_DIR` for config files and
-// `SCROLL_PROVER_PARAMS_DIR` for param files.
-// `SCROLL_PROVER_OUTPUT_DIR` is optional, the chunk proofs are dumped if set.
-fn chunk_prove(chunk_id: i64, witness_block: &WitnessBlock) -> Result<()> {
-    // TODO: replace to one global chunk-prover.
-    let params_dir = read_env_var("SCROLL_PROVER_PARAMS_DIR", "./params".to_string());
-    let assets_dir = read_env_var("SCROLL_PROVER_ASSETS_DIR", "./assets".to_string());
-    let mut prover = zkevm::Prover::from_dirs(&params_dir, &assets_dir);
-
-    // Generate chunk-snark.
-    let name = format!("chunk_{chunk_id}");
-    let chunk_snark =
-        prover
-            .inner
-            .load_or_gen_final_chunk_snark(&name, witness_block, None, None)?;
-    log::info!("{name}: generated chunk-snark");
-
-    // Verify chunk-snark.
-    env::set_var("COMPRESSION_CONFIG", LayerId::Layer2.config_path());
-    let params = prover.inner.params(LayerId::Layer2.degree()).clone();
-    let pk = prover
-        .inner
-        .pk(LayerId::Layer2.id())
-        .ok_or_else(|| anyhow!("{name}: miss layer-2 pk"))?;
-    let vk = pk.get_vk().clone();
-    let verifier = common::Verifier::<CompressionCircuit>::new(params, vk);
-    log::info!("{name}: Constructed common verifier");
-
-    if let Ok(output_dir) = env::var("SCROLL_PROVER_OUTPUT_DIR") {
-        let chunk_hash = ChunkHash::from_witness_block(witness_block, false);
-        let chunk_proof = ChunkProof::new(
-            chunk_snark.clone(),
-            StorageTrace::default(),
-            Some(pk),
-            Some(chunk_hash),
-        )?;
-
-        // The generated filename is as `full_proof_batch_1_chunk_1.json`.
-        dump_as_json(&output_dir, &name, &chunk_proof)?;
-    }
-
-    let verified = verifier.verify_snark(chunk_snark);
-    if !verified {
-        bail!("{name}: failed to verify chunk-snark");
-    }
-    log::info!("{name}: verified normal proof");
-
-    Ok(())
-}
 
 // build common config from enviroment
 fn common_log() -> Result<Config> {
@@ -120,16 +63,16 @@ fn debug_log(output_dir: &str) -> Result<Config> {
     Ok(config)
 }
 
-fn prepare_chunk_dir(output_dir: &str, chunk_id: u64) -> Result<String> {
+fn prepare_output_dir(base_dir: &str, sub_dir: &str) -> Result<String> {
     use std::{fs, io::ErrorKind, path::Path};
-    let chunk_path = Path::new(output_dir).join(format!("{chunk_id}"));
-    fs::create_dir(chunk_path.as_path()).or_else(|e| match e.kind() {
-        ErrorKind::AlreadyExists => fs::metadata(chunk_path.as_path()).map(|_| ()),
+    let path = Path::new(base_dir).join(sub_dir);
+    fs::create_dir(path.as_path()).or_else(|e| match e.kind() {
+        ErrorKind::AlreadyExists => fs::metadata(path.as_path()).map(|_| ()),
         _ => Err(e),
     })?;
-    Ok(chunk_path
+    Ok(path
         .to_str()
-        .ok_or_else(|| anyhow!("invalid chunk path"))?
+        .ok_or_else(|| anyhow!("invalid output path"))?
         .into())
 }
 
@@ -160,9 +103,9 @@ fn record_chunk_traces(chunk_dir: &str, traces: &[BlockTrace]) -> Result<()> {
     Ok(())
 }
 
-fn mark_chunk_failure(chunk_dir: &str, data: &str) -> Result<()> {
+fn make_failure(dir: &str, data: &str) -> Result<()> {
     use std::{fs, path::Path};
-    fs::write(Path::new(chunk_dir).join("failure"), data)?;
+    fs::write(Path::new(dir).join("failure"), data)?;
     Ok(())
 }
 
@@ -201,6 +144,13 @@ async fn main() -> ExitCode {
         }
     };
 
+    // Save batch-id to do further batch-proving if it's a batch.
+    let batch_id = if let BatchOrChunkId::Batch(batch_id) = id {
+        Some(batch_id)
+    } else {
+        None
+    };
+
     let mut chunks_task_complete = true;
     let mut expected_failed_exit_code = EXIT_FAILED_ENV;
     match chunks {
@@ -209,6 +159,8 @@ async fn main() -> ExitCode {
             return ExitCode::from(EXIT_NO_MORE_TASK);
         }
         Some(chunks) => {
+            let mut chunk_proofs = vec![];
+
             // TODO: restart from last chunk?
             for chunk in chunks {
                 let chunk_id = chunk.index;
@@ -245,16 +197,17 @@ async fn main() -> ExitCode {
                 }
 
                 // start chunk-level testing
-                let chunk_dir = prepare_chunk_dir(&setting.data_output_dir, chunk_id as u64)
-                    .and_then(|chunk_dir| {
-                        record_chunk_traces(&chunk_dir, &block_traces)?;
-                        Ok(chunk_dir)
-                    })
-                    .and_then(|chunk_dir| {
-                        log::info!("chunk {} has been recorded to {}", chunk_id, chunk_dir);
-                        log_handle.set_config(debug_log(&chunk_dir)?);
-                        Ok(chunk_dir)
-                    });
+                let chunk_dir =
+                    prepare_output_dir(&setting.data_output_dir, &format!("chunk_{chunk_id}"))
+                        .and_then(|chunk_dir| {
+                            record_chunk_traces(&chunk_dir, &block_traces)?;
+                            Ok(chunk_dir)
+                        })
+                        .and_then(|chunk_dir| {
+                            log::info!("chunk {} has been recorded to {}", chunk_id, chunk_dir);
+                            log_handle.set_config(debug_log(&chunk_dir)?);
+                            Ok(chunk_dir)
+                        });
                 // u64).unwrap();
                 if let Err(e) = chunk_dir {
                     log::error!(
@@ -301,6 +254,7 @@ async fn main() -> ExitCode {
                         .map_err(|e| anyhow::anyhow!("testnet: building block failed {e:?}"))?;
 
                     // mock
+                    let mut chunk_proof = None;
                     if spec_tasks.iter().any(|str| str.as_str() == "mock") {
                         Prover::<SuperCircuit>::mock_prove_witness_block(&witness_block)
                         .map_err(|e| {
@@ -310,11 +264,15 @@ async fn main() -> ExitCode {
 
                     // prove
                     if spec_tasks.iter().any(|str| str.as_str() == "prove") {
-                        chunk_prove(chunk_id, &witness_block).map_err(|e| {
-                            anyhow::anyhow!(
-                                "testnet: failed to prove chunk {chunk_id} inside {id}:\n{e:?}"
-                            )
-                        })?;
+                        // Set ENV SCROLL_PROVER_ASSETS_DIR for asset files and
+                        // SCROLL_PROVER_PARAMS_DIR for param files.
+                        let proof =
+                            prover::test::chunk_prove(&format!("chunk_{chunk_id}"), &witness_block);
+
+                        // Save chunk-proof only for further batch-proving.
+                        if batch_id.is_some() {
+                            chunk_proof = Some(proof);
+                        }
                     }
 
                     // panic: for test
@@ -322,7 +280,7 @@ async fn main() -> ExitCode {
                         panic!("test panic");
                     }
 
-                    Ok(())
+                    Ok(chunk_proof)
                 });
 
                 let _ = panic::take_hook();
@@ -330,7 +288,7 @@ async fn main() -> ExitCode {
                 // this can not be handled gracefully
                 log_handle.set_config(common_log().unwrap());
 
-                if let Err(e) = handling_ret
+                match handling_ret
                     .map_err(|_| {
                         // panic and we catch it in `panic_message`
                         let err_msg = panic_message
@@ -341,22 +299,43 @@ async fn main() -> ExitCode {
                     })
                     .and_then(|r| r)
                 {
-                    log::info!("encounter some error in batch {id}");
-                    let err_content = e.to_string();
-                    // some special handling to avoid false positive
-                    if err_content.contains("no gpu device") {
-                        log::error!("the error is a false positive result caused by hardware failure, stop this node on {}: {:?}", chunk_id, e);
-                        chunks_task_complete = false;
-                        break;
+                    Ok(chunk_proof) => {
+                        if let Some(proof) = chunk_proof {
+                            chunk_proofs.push(proof);
+                        }
                     }
+                    Err(e) => {
+                        log::info!("encounter some error in batch {id}");
+                        let err_content = e.to_string();
+                        // some special handling to avoid false positive
+                        if err_content.contains("no gpu device") {
+                            log::error!("the error is a false positive result caused by hardware failure, stop this node on {}: {:?}", chunk_id, e);
+                            chunks_task_complete = false;
+                            break;
+                        }
 
-                    if let Err(e) = mark_chunk_failure(&chunk_dir, &err_content) {
-                        log::error!("can not output error data for chunk {}: {:?}", chunk_id, e);
-                        chunks_task_complete = false;
-                        break;
+                        if let Err(e) = make_failure(&chunk_dir, &err_content) {
+                            log::error!(
+                                "can not output error data for chunk {}: {:?}",
+                                chunk_id,
+                                e
+                            );
+                            chunks_task_complete = false;
+                            break;
+                        }
                     }
                 }
                 log::info!("chunk {} has been handled", chunk_id);
+            }
+
+            // Only do batch-proving for a batch.
+            if let Some(batch_id) = batch_id {
+                chunks_task_complete = batch_prove(
+                    batch_id,
+                    &setting.data_output_dir,
+                    &log_handle,
+                    chunk_proofs,
+                );
             }
         }
     }
@@ -571,24 +550,109 @@ impl Setting {
     }
 }
 
-// TODO: not compiled after v0.9.0
-/*
+// Return true if success, false otherwise.
+fn batch_prove(
+    batch_id: i64,
+    output_dir: &str,
+    log_handle: &log4rs::Handle,
+    chunk_proofs: Vec<ChunkProof>,
+) -> bool {
+    let output_dir = prepare_output_dir(output_dir, &format!("batch_{batch_id}")).and_then(|dir| {
+        log::info!("batch {} has been recorded to {}", batch_id, dir);
+        log_handle.set_config(debug_log(&dir)?);
+        Ok(dir)
+    });
+    if let Err(e) = output_dir {
+        log::error!(
+            "can not prepare output enviroment for batch {}: {:?}",
+            batch_id,
+            e
+        );
+        return false;
+    }
+    let output_dir = output_dir.expect("ok ensured");
+
+    let panic_message = std::sync::Arc::new(std::sync::RwLock::new(String::from(
+        "unknown error, message not recorded",
+    )));
+
+    let out_err = panic_message.clone();
+    panic::set_hook(Box::new(move |panic_info| {
+        let err_msg = format!(
+            "{} \nbacktrace: {}",
+            panic_info,
+            backtrace::Backtrace::capture(),
+        );
+
+        match out_err.write() {
+            Ok(mut error_str) => {
+                *error_str = err_msg;
+            }
+            Err(e) => {
+                log::error!(
+                    "fail to write error message: {:?}\n backup testnet panic {}",
+                    e,
+                    err_msg
+                );
+            }
+        }
+    }));
+
+    let chunk_hashes_proofs = chunk_proofs
+        .into_iter()
+        .map(|proof| (proof.chunk_hash.unwrap(), proof))
+        .collect();
+    let handling_ret = panic::catch_unwind(|| {
+        prover::test::batch_prove(&format!("batch_{batch_id}"), chunk_hashes_proofs)
+    });
+
+    let _ = panic::take_hook();
+    log_handle.set_config(common_log().unwrap());
+
+    if let Err(e) = handling_ret.map_err(|_| {
+        // panic and we catch it in `panic_message`
+        let err_msg = panic_message
+            .read()
+            .map(|reader| reader.clone())
+            .unwrap_or(String::from("can not access panic_message"));
+        anyhow!("testnet panic: {}", err_msg)
+    }) {
+        log::info!("encounter some error in batch {batch_id}");
+        let err_content = e.to_string();
+        // some special handling to avoid false positive
+        if err_content.contains("no gpu device") {
+            log::error!("the error is a false positive result caused by hardware failure, stop this node on {}: {:?}", batch_id, e);
+            return false;
+        }
+
+        if let Err(e) = make_failure(&output_dir, &err_content) {
+            log::error!("can not output error data for batch {}: {:?}", batch_id, e);
+            return false;
+        }
+    }
+    log::info!("batch {} has been handled", batch_id);
+
+    true
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
-    use prover::{test_util::load_block_traces_for_test, utils::init_env_and_log};
+    use prover::{test::chunk_prove, utils::get_block_trace_from_file};
 
-    // Long running test on GPU
+    // Long running prove on GPU
     #[ignore]
     #[test]
-    fn test_chunk_prove() {
-        init_env_and_log("chunk_tests");
+    fn test_chunk_and_batch_proving() {
+        let output_dir = read_env_var("OUTPUT_DIR", "output".to_string());
+        let trace_path = read_env_var("TRACE_PATH", "trace.json".to_string());
 
-        let block_traces = load_block_traces_for_test().1;
-        let witness_block = block_traces_to_witness_block(&block_traces).unwrap();
+        let log_handle = log4rs::init_config(common_log().unwrap()).unwrap();
 
-        let result = chunk_prove(1, &witness_block);
-        assert!(result.is_ok());
+        let block_trace = get_block_trace_from_file(trace_path);
+        let witness_block = block_traces_to_witness_block(&[block_trace]).unwrap();
+
+        let chunk_proof = chunk_prove("chunk_1", &witness_block);
+        assert!(batch_prove(1, &output_dir, &log_handle, vec![chunk_proof]));
     }
 }
-*/

@@ -1,6 +1,6 @@
-.PHONY: download-setup docker-build gpu-docker-build
+.PHONY: docker-build gpu-docker-build gpu-download-halo2 gpu-download-params
 
-HALO2_GPU_VERSION=v0.5.0
+HALO2_GPU_VERSION=v0.6.0
 
 docker-build:
 	docker build -t scrolltech/testnet-runner .
@@ -11,9 +11,8 @@ gpu-download-halo2:
 gpu-docker-build:
 	docker build -f Dockerfile.gpu -t scrolltech/cuda-testnet-runner .
 
-gpu-asset-download:
+gpu-download-params:
 	mkdir -p ./assets
 	wget https://circuit-release.s3.us-west-2.amazonaws.com/setup/params20 -O ./assets/params20
 	wget https://circuit-release.s3.us-west-2.amazonaws.com/setup/params24 -O ./assets/params24
-	wget https://circuit-release.s3.us-west-2.amazonaws.com/release-v0.7.2/layer1.config -O ./assets/layer1.config
-	wget https://circuit-release.s3.us-west-2.amazonaws.com/release-v0.7.2/layer2.config -O ./assets/layer2.config
+	wget https://circuit-release.s3.us-west-2.amazonaws.com/setup/params26 -O ./assets/params26

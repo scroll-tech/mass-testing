@@ -64,5 +64,5 @@ efforts (for mock proving, it is expected to the works for about 1 hrs)
 
 + download `halo2-gpu` by `make gpu-download-halo2`
 + build `Dockerfile.gpu` in parent directory
-+ download asset files for chunk-prove by `make gpu-asset-download`
++ download params files for chunk-proving and batch-proving by `make gpu-download-params`
 + edit and use `docker-compose-gpu.yml` to start testnet runner
