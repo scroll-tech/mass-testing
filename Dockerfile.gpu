@@ -12,13 +12,13 @@ FROM nvidia/cuda:11.7.1-runtime-ubuntu22.04
 RUN apt update && apt install -y curl
 WORKDIR /opt
 RUN mkdir assets
-RUN curl -o ./assets/layer1.config https://circuit-release.s3.us-west-2.amazonaws.com/release-v0.9.3/layer1.config
-RUN curl -o ./assets/layer2.config https://circuit-release.s3.us-west-2.amazonaws.com/release-v0.9.3/layer2.config
-RUN curl -o ./assets/layer3.config https://circuit-release.s3.us-west-2.amazonaws.com/release-v0.9.3/layer3.config
-RUN curl -o ./assets/layer4.config https://circuit-release.s3.us-west-2.amazonaws.com/release-v0.9.3/layer4.config
-RUN curl -o ./assets/agg_vk.vkey https://circuit-release.s3.us-west-2.amazonaws.com/release-v0.9.3/agg_vk.vkey
-RUN curl -o ./assets/chunk.protocol https://circuit-release.s3.us-west-2.amazonaws.com/release-v0.9.3/chunk.protocol
-RUN curl -o ./assets/evm_verifier.bin https://circuit-release.s3.us-west-2.amazonaws.com/release-v0.9.3/evm_verifier.bin
+RUN curl -o ./assets/layer1.config https://circuit-release.s3.us-west-2.amazonaws.com/release-v0.9.4/layer1.config
+RUN curl -o ./assets/layer2.config https://circuit-release.s3.us-west-2.amazonaws.com/release-v0.9.4/layer2.config
+RUN curl -o ./assets/layer3.config https://circuit-release.s3.us-west-2.amazonaws.com/release-v0.9.4/layer3.config
+RUN curl -o ./assets/layer4.config https://circuit-release.s3.us-west-2.amazonaws.com/release-v0.9.4/layer4.config
+RUN curl -o ./assets/agg_vk.vkey https://circuit-release.s3.us-west-2.amazonaws.com/release-v0.9.4/agg_vk.vkey
+RUN curl -o ./assets/chunk.protocol https://circuit-release.s3.us-west-2.amazonaws.com/release-v0.9.4/chunk.protocol
+RUN curl -o ./assets/evm_verifier.bin https://circuit-release.s3.us-west-2.amazonaws.com/release-v0.9.4/evm_verifier.bin
 COPY --from=builder /root/src/target/release/testnet-runner /bin/
 COPY --from=builder /root/src/target/release/libzktrie.so /usr/local/lib
 COPY --from=builder /root/src/run.sh /opt/testnet-runner.sh
