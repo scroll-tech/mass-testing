@@ -335,18 +335,18 @@ async fn main() -> ExitCode {
                 log::info!("batch {} has been recorded to {}", batch_id, dir);
                 log_handle.set_config(debug_log(&dir)?);
                 task_core(&dir, &log_handle, move || {
-                    // check prove vector
-                    if !chunks_task_complete || chunk_proofs.iter().any(Option::is_none) {
-                        bail!("some chunk proof is not success, fail aggregation");
-                    }
-
-                    let chunk_hashes_proofs = chunk_proofs
-                        .into_iter()
-                        .map(Option::unwrap)
-                        .map(|proof| (proof.chunk_hash.unwrap(), proof))
-                        .collect();
-
                     if spec_tasks.iter().any(|str| str.as_str() == "agg") {
+                        // check prove vector
+                        if !chunks_task_complete || chunk_proofs.iter().any(Option::is_none) {
+                            bail!("some chunk proof is not success, fail aggregation");
+                        }
+
+                        let chunk_hashes_proofs = chunk_proofs
+                            .into_iter()
+                            .map(Option::unwrap)
+                            .map(|proof| (proof.chunk_hash.unwrap(), proof))
+                            .collect();
+
                         // note: would panic if any error raised
                         prover::test::batch_prove(&format!("{id}"), chunk_hashes_proofs);
                     }
