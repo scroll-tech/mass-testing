@@ -13,7 +13,7 @@ services:
      - /opt/export
      - /srv/alpha-replay/public_env    
     environment:
-      - TESTNET_TASKS=prove
+      - TESTNET_TASKS=prove,agg
       - ISSUE_DIR=/replay/issues
       - SCROLL_PROVER_ASSETS_DIR=/opt/assets
       - SCROLL_PROVER_PARAMS_DIR=/opt/params
