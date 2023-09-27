@@ -328,47 +328,46 @@ async fn main() -> ExitCode {
     }
 
     // batch prove
-    if setting.spec_tasks.iter().any(|str| str.as_str() == "agg") && chunks_task_complete {
-        if let Some(batch_id) = batch_id {
-            chunks_task_complete =
-                prepare_output_dir(&setting.data_output_dir, &format!("batch_{batch_id}"))
-                    .and_then(|dir| {
-                        log::info!("batch {} has been recorded to {}", batch_id, dir);
-                        log_handle.set_config(debug_log(&dir)?);
-                        task_core(&dir, &log_handle, move || {
-                            // check prove vector
-                            if chunk_proofs.iter().any(Option::is_none) {
-                                bail!("some chunk proof is not success, fail aggregation");
-                            }
+    let task_complete = if let Some(batch_id) = batch_id {
+        let spec_tasks = setting.spec_tasks.clone();
+        prepare_output_dir(&setting.data_output_dir, &format!("batch_{batch_id}"))
+            .and_then(|dir| {
+                log::info!("batch {} has been recorded to {}", batch_id, dir);
+                log_handle.set_config(debug_log(&dir)?);
+                task_core(&dir, &log_handle, move || {
+                    // check prove vector
+                    if !chunks_task_complete || chunk_proofs.iter().any(Option::is_none) {
+                        bail!("some chunk proof is not success, fail aggregation");
+                    }
 
-                            let chunk_hashes_proofs = chunk_proofs
-                                .into_iter()
-                                .map(Option::unwrap)
-                                .map(|proof| (proof.chunk_hash.unwrap(), proof))
-                                .collect();
+                    let chunk_hashes_proofs = chunk_proofs
+                        .into_iter()
+                        .map(Option::unwrap)
+                        .map(|proof| (proof.chunk_hash.unwrap(), proof))
+                        .collect();
 
-                            // note: would panic if any error raised
-                            prover::test::batch_prove(&format!("{id}"), chunk_hashes_proofs);
-                            Ok(())
-                        })
-                    })
-                    .map_err(|e| {
-                        log::error!("stop node since failure in aggregation: {}", e);
-                        e
-                    })
-                    .is_ok();
-        } else {
-            log::error!("specify aggregation in chunk proving, check wrong config");
-            chunks_task_complete = false;
-        }
-    }
+                    if spec_tasks.iter().any(|str| str.as_str() == "agg") {
+                        // note: would panic if any error raised
+                        prover::test::batch_prove(&format!("{id}"), chunk_hashes_proofs);
+                    }
+                    Ok(())
+                })
+            })
+            .map_err(|e| {
+                log::error!("stop node since failure in aggregation: {}", e);
+                e
+            })
+            .is_ok()
+    } else {
+        chunks_task_complete
+    };
 
-    if let Err(e) = notify_chunks_complete(&setting, *id.as_ref(), chunks_task_complete).await {
+    if let Err(e) = notify_chunks_complete(&setting, *id.as_ref(), task_complete).await {
         log::error!("can not deliver complete notify to coordinator: {e:?}");
         return ExitCode::from(EXIT_FAILED_ENV_WITH_TASK);
     }
 
-    if chunks_task_complete {
+    if task_complete {
         log::info!("relay-alpha testnet runner: complete");
         ExitCode::from(0)
     } else {
