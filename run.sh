@@ -82,7 +82,7 @@ function check_output {
       #TODO copy $chunk_dir
       chunk_name=`echo "$chunk_dir" | grep -oE '[^/]+$'`
       echo "${chunk_name} fail (${chunk_dir})"
-      curl -H "User-Agent: ${curl_agent}" -s "${COORDINATOR_API_URL}nodewarning?chunk_issue=${chunk_name}"
+      curl -H "User-Agent: ${curl_agent}" -s "${COORDINATOR_API_URL}nodewarning?chunk_issue=${chunk_name}" || true
       cp -rf ${chunk_dir} ${issue_dir}
       rm -f ${fail_file}
     fi
