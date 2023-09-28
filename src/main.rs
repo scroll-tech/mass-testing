@@ -1,6 +1,6 @@
 #![allow(dead_code)]
 use anyhow::{anyhow, bail, Result};
-use ethers_providers::{Http, Provider};
+use ethers_providers::{Http, Provider, ProviderError};
 use log4rs::{
     append::{
         console::{ConsoleAppender, Target},
@@ -229,20 +229,42 @@ async fn main() -> ExitCode {
                 for block_id in chunk.start_block_number..=chunk.end_block_number {
                     log::info!("run-testnet: requesting trace of block {block_id}");
 
-                    match provider
-                        .request(
-                            "scroll_getBlockTraceByNumberOrHash",
-                            [format!("{block_id:#x}")],
-                        )
-                        .await
-                    {
-                        Ok(trace) => {
-                            block_traces.push(trace);
+                    let mut exit_loop_for_error = true;
+                    for _ in 0..3 {
+                        match provider
+                            .request(
+                                "scroll_getBlockTraceByNumberOrHash",
+                                [format!("{block_id:#x}")],
+                            )
+                            .await
+                        {
+                            Ok(trace) => {
+                                block_traces.push(trace);
+                                exit_loop_for_error = false;
+                                break;
+                            }
+                            Err(ProviderError::HTTPError(e)) => {
+                                if !e.is_connect() && !e.is_timeout() {
+                                    log::error!("obtain trace from block provider fail for network issue: {e:?}");
+                                    break;
+                                } else {
+                                    // we take a reset and retry at most 3 times for network issue, to handle the
+                                    // terrible network condition in chn
+                                    log::warn!(
+                                        "maybe temporary network issue ({e:?}), reset and retry"
+                                    );
+                                    use std::{thread, time};
+                                    thread::sleep(time::Duration::from_secs(200));
+                                }
+                            }
+                            Err(e) => {
+                                log::error!("obtain trace from block provider fail: {e:?}");
+                                break;
+                            }
                         }
-                        Err(e) => {
-                            log::error!("obtain trace from block provider fail: {e:?}");
-                            break;
-                        }
+                    }
+                    if exit_loop_for_error {
+                        break;
                     }
                 }
 
@@ -329,35 +351,41 @@ async fn main() -> ExitCode {
 
     // batch prove
     let task_complete = if let Some(batch_id) = batch_id {
-        let spec_tasks = setting.spec_tasks.clone();
-        prepare_output_dir(&setting.data_output_dir, &format!("batch_{batch_id}"))
-            .and_then(|dir| {
-                log::info!("batch {} has been recorded to {}", batch_id, dir);
-                log_handle.set_config(debug_log(&dir)?);
-                task_core(&dir, &log_handle, move || {
-                    if spec_tasks.iter().any(|str| str.as_str() == "agg") {
-                        // check prove vector
-                        if !chunks_task_complete || chunk_proofs.iter().any(Option::is_none) {
-                            bail!("some chunk proof is not success, fail aggregation");
+        if !chunks_task_complete {
+            // fail fast
+            false
+        } else {
+            let spec_tasks = setting.spec_tasks.clone();
+            prepare_output_dir(&setting.data_output_dir, &format!("batch_{batch_id}"))
+                .and_then(|dir| {
+                    log::info!("batch {} has been recorded to {}", batch_id, dir);
+                    log_handle.set_config(debug_log(&dir)?);
+                    task_core(&dir, &log_handle, move || {
+                        // batch prove
+                        if spec_tasks.iter().any(|str| str.as_str() == "agg") {
+                            // check prove vector
+                            if chunk_proofs.iter().any(Option::is_none) {
+                                bail!("some chunk proof is not success, fail aggregation");
+                            }
+
+                            let chunk_hashes_proofs = chunk_proofs
+                                .into_iter()
+                                .map(Option::unwrap)
+                                .map(|proof| (proof.chunk_hash.unwrap(), proof))
+                                .collect();
+
+                            // note: would panic if any error raised
+                            prover::test::batch_prove(&format!("{id}"), chunk_hashes_proofs);
                         }
-
-                        let chunk_hashes_proofs = chunk_proofs
-                            .into_iter()
-                            .map(Option::unwrap)
-                            .map(|proof| (proof.chunk_hash.unwrap(), proof))
-                            .collect();
-
-                        // note: would panic if any error raised
-                        prover::test::batch_prove(&format!("{id}"), chunk_hashes_proofs);
-                    }
-                    Ok(())
+                        Ok(())
+                    })
                 })
-            })
-            .map_err(|e| {
-                log::error!("stop node since failure in aggregation: {}", e);
-                e
-            })
-            .is_ok()
+                .map_err(|e| {
+                    log::error!("stop node since failure in aggregation: {}", e);
+                    e
+                })
+                .is_ok()
+        }
     } else {
         chunks_task_complete
     };
