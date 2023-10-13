@@ -1,0 +1,30 @@
+version: '3'
+services:
+  test-runner:
+    build:
+      pull: true
+      context: ./
+      dockerfile: Dockerfile.deploy
+    container_name: mass-testing-runner
+    env_file:
+     - /home/ubuntu/tool/export
+     - /srv/alpha-replay/public_env
+    environment:
+     - ISSUE_DIR=/replay/issues
+     - TESTNET_TASKS=mock
+     - RUST_BACKTRACE=1
+     - CHAIN_ID=534353
+    command: ./wrap_group.sh
+    # restart: on-failure
+    # ports:
+    #   - 19100:8000
+    logging:
+      driver: json-file
+      options:
+        max-size: '100m'
+        max-file: '2'
+    volumes:
+      - /srv/alpha-replay/:/replay
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1

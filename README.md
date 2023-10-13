@@ -55,14 +55,18 @@ efforts (for mock proving, it is expected to the works for about 1 hrs)
 
 ## Docker ##
 
-### CPU ###
-+ build `Dockerfile` in parent directory
++ build `Dockerfile.mock` in parent directory
 + docker run -e L2GETH_API_URL=\<geth entrypoint\> -e COORDINATOR_API_URL=\<coordinator url\> -e TESTNET_TASKS=mock,prove,agg \<docker image\>
 + The entrypoint for `L2GETH_API_URL` is the URL which we passed to `geth connect`
 
-### GPU ###
+### Common running ###
 
 + download `halo2-gpu` by `make gpu-download-halo2`
-+ build `Dockerfile.gpu` in parent directory
++ build `Dockerfile` in parent directory and tag it as "masstest-runner-gpu"
 + download params files for chunk-proving and batch-proving by `make gpu-download-params`
-+ edit and use `docker-compose-gpu.yml` to start testnet runner
++ Use docker compose to build and start testnet runner
+
+### Mock only with CPU ###
+
++ Use docker compose with compose file `docker-compose-mock.yml` to start testnet runner
+
